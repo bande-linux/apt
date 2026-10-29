@@ -1,0 +1,36 @@
+name: check
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out (actions/checkout v7)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the tools
+        run: |
+          apt-get update -qq
+          xargs apt-get install -y -qq --no-install-recommends < ci/packages
+
+      - name: Shellcheck and tests
+        run: tests/run-all.sh
+
+      - name: Signing key lifetime
+        run: |
+          if [ -s conf/signing-keys ]; then
+            scripts/check-key-expiry.sh conf
+          else
+            echo "::warning::conf/signing-keys is empty; no archive key is configured yet"
+          fi
