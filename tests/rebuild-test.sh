@@ -5,10 +5,10 @@
 conf=$scratch/conf
 make_conf "$conf"
 rebuild() { "$root/scripts/rebuild.sh" --conf "$conf" --cache "$scratch/cache" "$@"; }
-listed() { grep -h '^Package:\|^Version:' "$1"/dists/"$2"/main/binary-arm64/Packages | paste - - | awk '{ print $2 "=" $4 }' | sort | tr '\n' ' '; }
+listed() { grep -h '^Package:\|^Version:' "$1/dists/$2/main/binary-$host_arch/Packages" | paste - - | awk '{ print $2 "=" $4 }' | sort | tr '\n' ' '; }
 has() { [[ " $(listed "$1" "$2")" == *" $3 "* ]]; }
 lacks() { ! has "$@"; }
-build() { make_deb "$scratch/in-$1" unbound-compositor "$2" arm64; make_deb "$scratch/in-$1" unbound-desktop "$2" all; }
+build() { make_deb "$scratch/in-$1" unbound-compositor "$2" "$host_arch"; make_deb "$scratch/in-$1" unbound-desktop "$2" all; }
 
 empty=$(mktemp -d -p "$scratch")
 refuses "first publish needs --initial" "pass --initial" \
@@ -34,7 +34,7 @@ for build_no in 2 3 4; do
 done
 check "testing carries the newest build" has "$site" trixie-testing unbound-compositor=0.0.0+git20261030.4.bbbbbb4
 check "testing dropped the previous build" lacks "$site" trixie-testing unbound-compositor=0.0.0+git20261030.3.bbbbbb3
-check "dropped files leave the pool" test ! -e "$site/pool/main/u/unbound-compositor/unbound-compositor_0.0.0+git20261029.1.aaaaaaa_arm64.deb"
+check "dropped files leave the pool" test ! -e "$site/pool/main/u/unbound-compositor/unbound-compositor_0.0.0+git20261029.1.aaaaaaa_${host_arch}.deb"
 check "channel packages survive rebuilds" has "$site" trixie unbound-archive-keyring=1.0
 
 live=$(serve "$site")
@@ -42,11 +42,11 @@ check "republishing the same build changes nothing" rebuild --live "$live" --cha
 check "same build gives the same packages" diff <(listed "$site" trixie-testing) <(listed "$scratch/same" trixie-testing)
 refuses "an older build is refused" "is older than" \
     rebuild --live "$live" --channel testing --debs "$scratch/in-2" --out "$scratch/older"
-make_deb "$scratch/in-changed" unbound-compositor 0.0.0+git20261030.4.bbbbbb4 arm64 changed
+make_deb "$scratch/in-changed" unbound-compositor 0.0.0+git20261030.4.bbbbbb4 "$host_arch" changed
 refuses "a changed package under a published version is refused" "different contents" \
     rebuild --live "$live" --channel testing --debs "$scratch/in-changed" --out "$scratch/changed"
 
-make_deb "$scratch/in-old-source" unbound-compositor 0.1.0 arm64
+make_deb "$scratch/in-old-source" unbound-compositor 0.1.0 "$host_arch"
 make_deb "$scratch/in-old-source" unbound-apt-source 0.9 all
 check "an older channel package from a tag is skipped" rebuild --live "$live" --channel stable --debs "$scratch/in-old-source" --out "$scratch/release"
 check "release carries the tag" has "$scratch/release" trixie unbound-compositor=0.1.0
