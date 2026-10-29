@@ -1,0 +1,12 @@
+ca-certificates
+curl
+dpkg-dev
+gnupg
+gpgv
+jq
+python3
+reprepro
+shellcheck
+sqv
+unzip
+xz-utils

@@ -1,0 +1,19 @@
+Origin: Unbound
+Label: Unbound
+Codename: trixie
+Suite: trixie
+Architectures: arm64
+Components: main
+Description: Unbound desktop for Debian 13, release channel (tagged versions)
+DebIndices: Packages Release . .gz .xz
+SignWith: @SIGNING_KEYS@
+
+Origin: Unbound
+Label: Unbound
+Codename: trixie-testing
+Suite: trixie-testing
+Architectures: arm64
+Components: main
+Description: Unbound desktop for Debian 13, testing channel (every green build of main)
+DebIndices: Packages Release . .gz .xz
+SignWith: @SIGNING_KEYS@

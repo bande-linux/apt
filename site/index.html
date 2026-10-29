@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unbound APT repository</title>
+<style>
+:root { --bg: #fbfbfa; --fg: #1d1d1f; --muted: #5f6368; --code: #f0f0ee; --line: #dcdcd8; }
+@media (prefers-color-scheme: dark) { :root { --bg: #161617; --fg: #ececec; --muted: #a1a1a6; --code: #232325; --line: #333336; } }
+body { background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, sans-serif; margin: 0; padding: 0 16px; }
+main { max-width: 46rem; margin: 3rem auto; }
+h1 { font-size: 1.9rem; margin-bottom: .2rem; }
+h2 { font-size: 1.2rem; margin-top: 2.2rem; }
+p.lead { color: var(--muted); margin-top: 0; }
+pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
+code { font: 14px/1.5 ui-monospace, monospace; }
+p code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
+.fpr { word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+<h1>Unbound</h1>
+<p class="lead">APT repository for the Unbound desktop on Debian 13 (trixie), arm64.</p>
+
+<h2>Install</h2>
+<p>Choose a channel. <strong>Release</strong> carries tagged versions only. <strong>Testing</strong>
+carries the newest build of every change merged to <code>main</code>. Your machine then updates
+from that channel alone.</p>
+<p>1. Download the keyring and the channel package from the latest GitHub release, and install both.
+For the release channel:</p>
+<pre><code>cd /tmp
+wget https://github.com/unbound-linux/apt/releases/latest/download/unbound-archive-keyring.deb \
+     https://github.com/unbound-linux/apt/releases/latest/download/unbound-apt-source.deb
+sudo apt install ./unbound-archive-keyring.deb ./unbound-apt-source.deb</code></pre>
+<p>For testing, use <code>unbound-apt-source-testing.deb</code> in both places.</p>
+<p>2. Install the desktop:</p>
+<pre><code>sudo apt update
+sudo apt install unbound-desktop</code></pre>
+<p>Log out and choose <strong>Unbound</strong> at the login screen. Updates arrive with
+<code>sudo apt upgrade</code>.</p>
+
+<h2>Switch channel</h2>
+<pre><code>sudo apt install unbound-apt-source-testing   # to testing
+sudo apt install unbound-apt-source           # to release</code></pre>
+<p>Going back to release does not downgrade anything: packages keep their testing version until
+a release passes it.</p>
+
+<h2>Remove</h2>
+<pre><code>sudo apt purge unbound-apt-source unbound-apt-source-testing unbound-archive-keyring</code></pre>
+
+<h2>Signing key</h2>
+<p>Packages and indices are signed with the Unbound archive key
+(<a href="key.asc">key.asc</a>), fingerprint:</p>
+<pre><code class="fpr">@FINGERPRINT@</code></pre>
+<p>If a machine was offline through a key change and <code>apt update</code> reports a signature
+error, repeat step 1.</p>
+</main>
+</body>
+</html>
