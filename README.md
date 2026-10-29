@@ -40,6 +40,16 @@ repository packages (`unbound-archive-keyring`, `unbound-apt-source`,
 
 No state is kept between runs: the live site is the source of truth.
 
+[`publish.yml`](.github/workflows/publish.yml) runs these steps. The last job of desktop's CI
+starts it with the run id, and with the tag for a release.
+- **Release publishes** wait for approval in the `apt-stable-approval` environment.
+- **Signing:** the signing subkey is a secret of the `apt-publish` environment, which only `main`
+  can use.
+- **Deploy:** the site is deployed with `actions/deploy-pages`.
+- **Bootstrap release:** when the repository packages reach a new version,
+  [`scripts/bootstrap-release.sh`](scripts/bootstrap-release.sh) creates the GitHub release
+  `apt-source-VERSION`, which users download in the first install step.
+
 ## Signing keys
 
 [`conf/archive-key.asc`](conf/archive-key.asc) holds the public archive key or keys.
