@@ -29,11 +29,11 @@ d1=0.0.0+git20261029.1.aaaaaaa
 
 empty=$(mktemp -d -p "$scratch")
 refuses "first publish needs --initial" "pass --initial" \
-    rebuild --live "$(serve "$empty")" --component main --debs "$scratch/none" --out "$scratch/x"
+    rebuild --live "$(serve "$empty")" --add main="$scratch/none" --out "$scratch/x"
 
 desktop 1 "$d1"
 for p in bande-archive-keyring bande-apt-source; do make_deb "$scratch/in-1" $p 1.0 all; done
-check "initial desktop publish" rebuild --initial --live "$(serve "$empty")" --component main --debs "$scratch/in-1" --out "$scratch/site-1"
+check "initial desktop publish" rebuild --initial --live "$(serve "$empty")" --add main="$scratch/in-1" --out "$scratch/site-1"
 check "main carries the build on amd64 and arm64" both "$scratch/site-1" main "bande-compositor=$d1"
 check "main carries the architecture-independent packages on both" both "$scratch/site-1" main "bande-desktop=$d1"
 check "main carries the repository packages" both "$scratch/site-1" main bande-apt-source=1.0
@@ -44,7 +44,7 @@ check "index carries the fingerprint" grep -q "$(gpg --with-colons --show-keys "
 check "key.asc is published" cmp "$conf/archive-key.asc" "$scratch/site-1/key.asc"
 
 kernel k1 7.2.12 7.2.12-1+bande1
-check "kernel publish" rebuild --live "$(serve "$scratch/site-1")" --component apple --debs "$scratch/in-k1" --out "$scratch/site-k1"
+check "kernel publish" rebuild --live "$(serve "$scratch/site-1")" --add apple="$scratch/in-k1" --out "$scratch/site-k1"
 check "apple carries the kernel on arm64" has "$scratch/site-k1" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
 check "apple carries bande-os-apple" has "$scratch/site-k1" apple arm64 bande-os-apple=7.2.12-1+bande1
 check "apple stays empty on amd64" sh -c "[ -z \"\$(grep '^Package:' '$scratch/site-k1/dists/rolling/apple/binary-amd64/Packages')\" ]"
@@ -53,7 +53,7 @@ check "a kernel publish keeps main" diff <(listed "$scratch/site-1" main arm64) 
 site=$scratch/site-k1
 for n in 2 3 4; do
     desktop $n "0.0.0+git20261030.$n.bbbbbb$n"
-    check "desktop publish $n" rebuild --live "$(serve "$site")" --component main --debs "$scratch/in-$n" --out "$scratch/site-$n"
+    check "desktop publish $n" rebuild --live "$(serve "$site")" --add main="$scratch/in-$n" --out "$scratch/site-$n"
     site=$scratch/site-$n
 done
 check "main carries the newest build" both "$site" main bande-compositor=0.0.0+git20261030.4.bbbbbb4
@@ -63,11 +63,11 @@ check "repository packages survive rebuilds" has "$site" main arm64 bande-archiv
 check "desktop publishes keep the kernel" has "$site" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
 
 kernel k2 7.2.14 7.2.14-1+bande1
-check "a second kernel" rebuild --live "$(serve "$site")" --component apple --debs "$scratch/in-k2" --out "$scratch/site-k2"
+check "a second kernel" rebuild --live "$(serve "$site")" --add apple="$scratch/in-k2" --out "$scratch/site-k2"
 check "two kernels are both kept" has "$scratch/site-k2" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
 check "the second kernel is in" has "$scratch/site-k2" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+bande1
 kernel k3 7.3.1 7.3.1-1+bande2
-check "a third kernel" rebuild --live "$(serve "$scratch/site-k2")" --component apple --debs "$scratch/in-k3" --out "$scratch/site-k3"
+check "a third kernel" rebuild --live "$(serve "$scratch/site-k2")" --add apple="$scratch/in-k3" --out "$scratch/site-k3"
 site=$scratch/site-k3
 check "the newest kernel is in" has "$site" apple arm64 linux-image-7.3.1-apple-arm64-16k=7.3.1-1+bande2
 check "the one before it stays" has "$site" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+bande1
@@ -78,30 +78,39 @@ check "bande-os-apple follows the newest kernel" has "$site" apple arm64 bande-o
 check "main is untouched by kernels" diff <(listed "$scratch/site-4" main amd64) <(listed "$site" main amd64)
 
 live=$(serve "$site")
-check "republishing the same build changes nothing" rebuild --live "$live" --component main --debs "$scratch/in-4" --out "$scratch/same"
+check "republishing the same build changes nothing" rebuild --live "$live" --add main="$scratch/in-4" --out "$scratch/same"
 check "same build gives the same packages" diff <(listed "$site" main arm64) <(listed "$scratch/same" main arm64)
 refuses "an older build is refused" "is older than" \
-    rebuild --live "$live" --component main --debs "$scratch/in-2" --out "$scratch/older"
+    rebuild --live "$live" --add main="$scratch/in-2" --out "$scratch/older"
 refuses "an older kernel is refused" "is older than" \
-    rebuild --live "$live" --component apple --debs "$scratch/in-k2" --out "$scratch/older-kernel"
+    rebuild --live "$live" --add apple="$scratch/in-k2" --out "$scratch/older-kernel"
 make_deb "$scratch/in-changed" bande-compositor 0.0.0+git20261030.4.bbbbbb4 arm64 changed
 refuses "a changed package under a published version is refused" "different contents" \
-    rebuild --live "$live" --component main --debs "$scratch/in-changed" --out "$scratch/changed"
+    rebuild --live "$live" --add main="$scratch/in-changed" --out "$scratch/changed"
 make_deb "$scratch/in-split" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
 make_deb "$scratch/in-split" bande-greeter 0.0.0+git20261031.6.ddddddd arm64
-refuses "one architecture's packages of two versions are refused" "arm64 packages carry different versions" \
-    rebuild --live "$live" --component main --debs "$scratch/in-split" --out "$scratch/split"
+refuses "one architecture's packages of two versions are refused" "arm64 packages for main carry different versions" \
+    rebuild --live "$live" --add main="$scratch/in-split" --out "$scratch/split"
 make_deb "$scratch/in-split-all" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
 make_deb "$scratch/in-split-all" bande-desktop 0.0.0+git20261031.6.ddddddd all
-refuses "an architecture-independent package of another version is refused" "arm64 packages carry different versions" \
-    rebuild --live "$live" --component main --debs "$scratch/in-split-all" --out "$scratch/split-all"
+refuses "an architecture-independent package of another version is refused" "arm64 packages for main carry different versions" \
+    rebuild --live "$live" --add main="$scratch/in-split-all" --out "$scratch/split-all"
 make_deb "$scratch/in-mixed" bande-compositor 0.0.0+git20261031.5.ccccccc amd64
 make_deb "$scratch/in-mixed" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
 make_deb "$scratch/in-mixed" bande-apt-source 1.1 all
-check "repository packages carry their own version" rebuild --live "$live" --component main --debs "$scratch/in-mixed" --out "$scratch/mixed"
+check "repository packages carry their own version" rebuild --live "$live" --add main="$scratch/in-mixed" --out "$scratch/mixed"
 make_deb "$scratch/in-misplaced" bande-archive-keyring 1.1 all
 refuses "repository packages stay in main" "belongs in main" \
-    rebuild --live "$live" --component apple --debs "$scratch/in-misplaced" --out "$scratch/misplaced"
+    rebuild --live "$live" --add apple="$scratch/in-misplaced" --out "$scratch/misplaced"
+
+desktop 5 0.0.0+git20261031.5.eeeeeee
+kernel k4 7.3.2 7.3.2-1+bande1
+check "one publish takes a desktop and a kernel" rebuild --live "$live" --add main="$scratch/in-5" --add apple="$scratch/in-k4" --out "$scratch/both"
+check "main takes the desktop" both "$scratch/both" main bande-compositor=0.0.0+git20261031.5.eeeeeee
+check "apple takes the kernel" has "$scratch/both" apple arm64 linux-image-7.3.2-apple-arm64-16k=7.3.2-1+bande1
+check "the kernel limit holds across both" lacks "$scratch/both" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+bande1
+refuses "every batch is checked" "belongs in main" \
+    rebuild --live "$live" --add main="$scratch/in-5" --add apple="$scratch/in-misplaced" --out "$scratch/both-bad"
 
 make_deb "$scratch/in-arm64" bande-compositor "$d1" arm64
 make_deb "$scratch/in-arm64" bande-desktop "$d1" all
@@ -109,10 +118,10 @@ partial_conf=$scratch/partial-conf
 cp -r "$conf" "$partial_conf"
 sed -i 's/^Architectures: .*/Architectures: arm64/; s/^Components: .*/Components: main/' "$partial_conf/distributions"
 (export GNUPGHOME=$conf/gnupg
- "$root/scripts/rebuild.sh" --conf "$partial_conf" --initial --live "$(serve "$empty")" --component main \
-    --debs "$scratch/in-arm64" --out "$scratch/partial") > /dev/null
+ "$root/scripts/rebuild.sh" --conf "$partial_conf" --initial --live "$(serve "$empty")" \
+    --add main="$scratch/in-arm64" --out "$scratch/partial") > /dev/null
 check "a live Release without amd64 and apple is taken" sh -c \
-    "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/partial")' --component apple --debs '$scratch/in-k1' --out '$scratch/grown' > '$scratch/grown.log'"
+    "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/partial")' --add apple='$scratch/in-k1' --out '$scratch/grown' > '$scratch/grown.log'"
 check "it says what starts empty" grep -q "does not list apple/binary-amd64/Packages.xz yet" "$scratch/grown.log"
 check "the arm64 packages carry over" has "$scratch/grown" main arm64 "bande-compositor=$d1"
 check "the new architecture starts empty" lacks "$scratch/grown" main amd64 "bande-compositor=$d1"
@@ -122,17 +131,17 @@ tampered=$(mktemp -d -p "$scratch")
 cp -r "$site/." "$tampered/"
 echo x >> "$tampered/pool/main/b/bande-desktop/bande-desktop_0.0.0+git20261030.4.bbbbbb4_all.deb"
 refuses "a tampered pool file is refused" "does not match its signed index" \
-    "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$tampered")" --component main --debs "$scratch/in-4" --out "$scratch/t1"
+    "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$tampered")" --add main="$scratch/in-4" --out "$scratch/t1"
 cp -r "$site/." "$tampered/"
 kernel_deb=$(find "$tampered/pool/apple" -type f -name 'linux-image-7.3.1-*.deb')
 echo x >> "$kernel_deb"
 refuses "a tampered kernel is refused" "does not match its signed index" \
-    "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$tampered")" --component main --debs "$scratch/in-4" --out "$scratch/t1b"
+    "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$tampered")" --add main="$scratch/in-4" --out "$scratch/t1b"
 forged=$scratch/forged
 (make_conf "$forged" && "$root/scripts/rebuild.sh" --conf "$forged" --initial --live "$(serve "$empty")" \
-    --component main --debs "$scratch/in-1" --out "$scratch/forged-site") > /dev/null
+    --add main="$scratch/in-1" --out "$scratch/forged-site") > /dev/null
 refuses "an index signed by another key is refused" "not signed by the archive key" \
-    "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$scratch/forged-site")" --component main --debs "$scratch/in-4" --out "$scratch/t2"
+    "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$scratch/forged-site")" --add main="$scratch/in-4" --out "$scratch/t2"
 
 big=$(mktemp -d -p "$scratch")
 cp -r "$site/." "$big/"
@@ -182,7 +191,7 @@ check "the download is the newest build" test -e "$lists/archives/bande-composit
 
 cp "$conf/archive-key.asc" "$scratch/old-key.asc"
 add_archive_key "$conf"
-check "rotation: rebuild signs with old and new key" rebuild --live "$(serve "$site")" --component main --debs "$scratch/in-4" --out "$scratch/rotated"
+check "rotation: rebuild signs with old and new key" rebuild --live "$(serve "$site")" --add main="$scratch/in-4" --out "$scratch/rotated"
 check "rotation: InRelease carries two signatures" sh -c "[ \$(gpgv --keyring '$conf/keyring.gpg' '$scratch/rotated/dists/rolling/InRelease' 2>&1 | grep -c 'Good signature') = 2 ]"
 gpg --dearmor < "$scratch/old-key.asc" > "$scratch/old.gpg"
 gpg --dearmor < "$conf/new-key.asc" > "$scratch/new.gpg"

@@ -12,7 +12,8 @@ export GH_TOKEN=test FETCH_RUN_POLL=1
 # Run 7 of a source repository, served as the GitHub API. Settings, all
 # optional: event, ref, status, conclusion, compare, workflow, tagged (the
 # commit tag v0.1.0 points at; v0.1.1 is annotated and points at the run's
-# commit). The run is the push of v0.1.0 for the desktop and a schedule on main
+# commit), named (the kernel's bande-version-NAMED artifact; empty: none). The
+# run is the push of v0.1.0 for the desktop and a schedule on main
 # for the kernel. Packages are
 # made with the functions below into $d/art/ARCH, one artifact per directory.
 desktop_debs() {
@@ -55,6 +56,10 @@ api() {
         jq --arg n "bande-debs-$(basename "$arch")" --argjson i "$id" '.artifacts += [{id: $i, name: $n}]' \
             "$base/actions/runs/7/artifacts" > "$d/artifacts" && mv "$d/artifacts" "$base/actions/runs/7/artifacts"
     done
+    if [ "$2" = kernel ] && [ -n "${named-$kernel_version}" ]; then
+        jq --arg n "bande-version-${named-$kernel_version}" '.artifacts += [{id: 99, name: $n}]' \
+            "$base/actions/runs/7/artifacts" > "$d/artifacts" && mv "$d/artifacts" "$base/actions/runs/7/artifacts"
+    fi
     export GITHUB_API_URL
     GITHUB_API_URL=$(serve "$d")
 }
@@ -116,8 +121,12 @@ d=$(case_dir); desktop_debs "$d" 0.1.1; api "$d" desktop
 refuses "packages of another version than the tag are refused" "carries version 0.1.1" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d" 0.1.0+git20261029.35.788731f; api "$d" desktop
 refuses "a main build's version under a tag is refused" "carries version" fetch desktop "$d/out"
-d=$(case_dir); kernel_debs "$d" 7.2.12-1; api "$d" kernel
-refuses "a kernel without the +bande suffix is refused" "carries version" fetch kernel "$d/out"
+d=$(case_dir); kernel_debs "$d" 7.2.12-1; named=7.2.12-1 api "$d" kernel
+refuses "a kernel without the +bande suffix is refused" "not <debian-version>+bandeN" fetch kernel "$d/out"
+d=$(case_dir); kernel_debs "$d" 7.2.12-1+bande2; api "$d" kernel
+refuses "kernel packages of another version than named are refused" "the run publishes 7.2.12-1+bande1" fetch kernel "$d/out"
+d=$(case_dir); kernel_debs "$d"; named='' api "$d" kernel
+refuses "a kernel run without its version artifact is refused" "names 0 versions" fetch kernel "$d/out"
 d=$(case_dir); desktop_debs "$d"; make_deb "$d/art/arm64" libc6 9.9 arm64; api "$d" desktop
 refuses "a package outside the archive's names is refused" "desktop does not publish" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; rm -r "$d/art/amd64"; api "$d" desktop

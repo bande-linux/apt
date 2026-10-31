@@ -3,14 +3,15 @@
 # Verifies a CI run of bande-linux/REPO (desktop or kernel): the repository's
 # release workflow, finished green, its commit on main. A desktop run must be
 # the push of a vX.Y.Z tag that points at the run's commit, and its packages
-# carry X.Y.Z. A kernel run must be a schedule or dispatch on main. Then downloads its bande-debs-ARCH artifacts into
-# OUT_DIR and checks that they carry only the repository's own package names,
-# every architecture it builds and the same packages for each. Prints
-# component= and appends it to $GITHUB_OUTPUT when set. Needs GH_TOKEN with
-# Actions and Contents read access to the repository.
+# carry X.Y.Z. A kernel run must be a schedule or dispatch on main, and name its
+# version with one bande-version-VERSION artifact, which its packages carry.
+# Then downloads its bande-debs-ARCH artifacts into OUT_DIR and checks that they
+# carry only the repository's own package names, every architecture it builds
+# and the same packages for each. Prints component= and appends it to
+# $GITHUB_OUTPUT when set. Needs GH_TOKEN; both repositories are public.
 #
-# The run's last job starts the publish, so the run is usually still going; this
-# waits up to $FETCH_RUN_WAIT seconds (default 900) for it to end.
+# A run given by hand may still be going; this waits up to $FETCH_RUN_WAIT
+# seconds (default 900) for it to end.
 set -euo pipefail
 
 source_repo=$1 run=$2 out=$3
@@ -22,7 +23,7 @@ fail() { echo "fetch-run: $*" >&2; exit 1; }
 
 # Per repository: its workflow, the events it publishes from, the package names
 # it may publish, the component they go to, the architectures it must build
-# (all: architecture-independent packages) and the form of its versions.
+# (all: architecture-independent packages).
 case $source_repo in
     desktop)
         workflow=.github/workflows/release.yml
@@ -37,7 +38,6 @@ case $source_repo in
         names=('linux-*-apple-*' bande-os-apple)
         component=apple
         architectures=(arm64)
-        version_form='^[0-9][^ ]*\+bande[0-9]+$'
         ;;
     *) fail "unknown repository $source_repo; the archive takes desktop and kernel" ;;
 esac
@@ -59,7 +59,7 @@ read -r event path ref sha owner < <(jq -r '[.event, .path, .head_branch, .head_
 if [ "$source_repo" = desktop ]; then
     tag=${ref#refs/tags/}
     [[ $tag =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || fail "run $run built $ref; the desktop publishes vX.Y.Z tags"
-    version_form="^${BASH_REMATCH[1]//./\\.}\$"
+    want_version=${BASH_REMATCH[1]}
     call "$api/repos/$repo/git/ref/tags/$tag" > "$work/tag.json" || fail "tag $tag does not exist"
     read -r type object < <(jq -r '[.object.type, .object.sha] | @tsv' "$work/tag.json")
     if [ "$type" = tag ]; then
@@ -88,6 +88,13 @@ case $status in
 esac
 
 call "$api/repos/$repo/actions/runs/$run/artifacts?per_page=100" > "$work/artifacts.json"
+if [ "$source_repo" = kernel ]; then
+    mapfile -t named < <(jq -r '.artifacts[].name | select(startswith("bande-version-")) | ltrimstr("bande-version-")' \
+        "$work/artifacts.json")
+    [ ${#named[@]} -eq 1 ] || fail "run $run names ${#named[@]} versions; it must upload one bande-version-VERSION artifact"
+    [[ ${named[0]} =~ ^[0-9][A-Za-z0-9.~-]*\+bande[0-9]+$ ]] || fail "run $run names version ${named[0]}, not <debian-version>+bandeN"
+    want_version=${named[0]}
+fi
 mkdir -p "$out"
 : > "$work/names"
 shopt -s nullglob
@@ -108,8 +115,8 @@ for arch in "${architectures[@]}"; do
             [[ $package != $pattern ]] || allowed=1
         done
         [ "$allowed" = 1 ] || fail "$(basename "$deb") is $package, which $source_repo does not publish"
-        if [[ $repository_packages != *" $package "* ]] && [[ ! $version =~ $version_form ]]; then
-            fail "$package from $sha carries version $version"
+        if [[ $repository_packages != *" $package "* ]] && [ "$version" != "$want_version" ]; then
+            fail "$package carries version $version, the run publishes $want_version"
         fi
         echo "$arch $package" >> "$work/names"
         mv "$deb" "$out/"

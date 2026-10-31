@@ -1,17 +1,20 @@
 name: publish
 
 on:
+  schedule:
+    - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
       repo:
-        description: Repository whose run to publish
-        required: true
-        type: choice
-        options: [desktop, kernel]
-      run_id:
-        description: Its release run (desktop release.yml, kernel follow-debian.yml)
-        required: true
+        description: Repository of the run to publish (desktop or kernel); empty finds new runs itself
+        required: false
         type: string
+        default: ''
+      run_id:
+        description: Its release run (desktop release.yml on a vX.Y.Z tag, kernel follow-debian.yml)
+        required: false
+        type: string
+        default: ''
       initial:
         description: The site holds no archive yet (first publish only)
         required: false
@@ -25,12 +28,56 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  find:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      runs: ${{ steps.find.outputs.runs }}
+    steps:
+      - name: Check out (actions/checkout v7)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the tools
+        run: |
+          apt-get update -qq
+          xargs apt-get install -y -qq --no-install-recommends < ci/packages
+
+      - name: Find runs newer than the live archive
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ inputs.repo }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          if [ -n "$REPO$RUN_ID" ]; then
+            if [ -z "$REPO" ] || [ -z "$RUN_ID" ]; then
+              echo "::error::repo and run_id are given together"
+              exit 1
+            fi
+            echo "$REPO $RUN_ID" > runs
+          else
+            scripts/find-runs.sh https://bande-linux.github.io/apt > runs
+          fi
+          if [ -s runs ]; then
+            cat runs
+            echo "runs=$(paste -sd, runs)" >> "$GITHUB_OUTPUT"
+          else
+            echo "Nothing new to publish"
+          fi
+
   build:
+    needs: find
+    if: needs.find.outputs.runs != ''
     runs-on: ubuntu-24.04
     container: debian:trixie
     environment: apt-publish
     timeout-minutes: 45
     permissions:
+      actions: read
       contents: read
     outputs:
       bootstrap: ${{ steps.packages.outputs.bootstrap }}
@@ -43,24 +90,18 @@ jobs:
           apt-get update -qq
           xargs apt-get install -y -qq --no-install-recommends < ci/packages
 
-      - name: Token for the source repository (actions/create-github-app-token v3)
-        id: token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
-        with:
-          client-id: ${{ vars.DESKTOP_READER_CLIENT_ID }}
-          private-key: ${{ secrets.DESKTOP_READER_KEY }}
-          owner: bande-linux
-          repositories: ${{ inputs.repo }}
-          permission-actions: read
-          permission-contents: read
-
-      - name: Verify the run and fetch its packages
-        id: fetch
+      - name: Verify the runs and fetch their packages
         env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
-          REPO: ${{ inputs.repo }}
-          RUN_ID: ${{ inputs.run_id }}
-        run: scripts/fetch-run.sh "$REPO" "$RUN_ID" debs
+          GH_TOKEN: ${{ github.token }}
+          RUNS: ${{ needs.find.outputs.runs }}
+        run: |
+          set -o pipefail
+          : > adds
+          tr , '\n' <<< "$RUNS" | while read -r repo run; do
+            component=$(env -u GITHUB_OUTPUT scripts/fetch-run.sh "$repo" "$run" "debs-$repo" < /dev/null |
+              sed -n 's/^component=//p')
+            printf -- '--add\n%s=debs-%s\n' "$component" "$repo" >> adds
+          done
 
       - name: Restore the pool cache (actions/cache v6)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
@@ -72,16 +113,16 @@ jobs:
       - name: Rebuild and sign the archive
         env:
           APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
-          COMPONENT: ${{ steps.fetch.outputs.component }}
           INITIAL: ${{ inputs.initial }}
         run: |
           GNUPGHOME=$(mktemp -d)
           export GNUPGHOME
           printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --quiet --import
+          mapfile -t adds < adds
           initial=()
           [ "$INITIAL" != true ] || initial=(--initial)
-          scripts/rebuild.sh --live https://bande-linux.github.io/apt --component "$COMPONENT" \
-            --debs debs --out public --cache pool-cache "${initial[@]}"
+          scripts/rebuild.sh --live https://bande-linux.github.io/apt "${adds[@]}" \
+            --out public --cache pool-cache "${initial[@]}"
           gpgconf --kill all
           rm -rf "$GNUPGHOME"
 
@@ -93,7 +134,7 @@ jobs:
       - name: Find the repository packages
         id: packages
         run: |
-          if ls debs/bande-apt-source_*_all.deb > /dev/null 2>&1; then
+          if ls debs-desktop/bande-apt-source_*_all.deb > /dev/null 2>&1; then
             echo bootstrap=true >> "$GITHUB_OUTPUT"
           fi
 
@@ -103,8 +144,8 @@ jobs:
         with:
           name: repository-packages
           path: |
-            debs/bande-archive-keyring_*_all.deb
-            debs/bande-apt-source_*_all.deb
+            debs-desktop/bande-archive-keyring_*_all.deb
+            debs-desktop/bande-apt-source_*_all.deb
           if-no-files-found: error
 
   deploy:

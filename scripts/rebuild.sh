@@ -1,9 +1,10 @@
 #!/bin/bash
-# Usage: rebuild.sh --live URL --component main|apple --debs DIR --out DIR
+# Usage: rebuild.sh --live URL --add COMPONENT=DIR [--add COMPONENT=DIR] --out DIR
 #                   [--conf DIR] [--cache DIR] [--initial]
 # Rebuilds the whole archive from the live, signature-checked site plus the
-# packages in DIR, which go to --component, signs it with the keys in
-# conf/signing-keys (secret keys in $GNUPGHOME) and writes the site to --out.
+# packages in each DIR, which go to its COMPONENT (main or apple), signs it with
+# the keys in conf/signing-keys (secret keys in $GNUPGHOME) and writes the site
+# to --out.
 # Each package keeps its newest version only, and apple keeps the packages of
 # its newest two kernel versions only.
 set -euo pipefail
@@ -18,12 +19,12 @@ keep_kernels=2
 
 conf=$here/../conf
 site_template=$here/../site
-live='' component='' debs='' out='' cache='' initial=0
+live='' out='' cache='' initial=0
+batches=()
 while [ $# -gt 0 ]; do
     case $1 in
         --live) live=${2%/}; shift 2 ;;
-        --component) component=$2; shift 2 ;;
-        --debs) debs=$2; shift 2 ;;
+        --add) batches+=("$2"); shift 2 ;;
         --out) out=$2; shift 2 ;;
         --conf) conf=$2; shift 2 ;;
         --cache) cache=$2; shift 2 ;;
@@ -32,8 +33,8 @@ while [ $# -gt 0 ]; do
     esac
 done
 fail() { echo "rebuild: $*" >&2; exit 1; }
-if [ -z "$live" ] || [ -z "$component" ] || [ -z "$debs" ] || [ -z "$out" ]; then
-    fail "--live, --component, --debs and --out are required"
+if [ -z "$live" ] || [ ${#batches[@]} -eq 0 ] || [ -z "$out" ]; then
+    fail "--live, --add and --out are required"
 fi
 conf=$(cd "$conf" && pwd)
 [ -s "$conf/archive-key.asc" ] || fail "$conf/archive-key.asc is missing"
@@ -53,7 +54,10 @@ field() {
 suite=$(field Codename)
 components=$(field Components)
 architectures=$(field Architectures)
-[[ " $components " == *" $component "* ]] || fail "$suite has no component $component"
+for batch in "${batches[@]}"; do
+    [[ $batch == *=* ]] || fail "--add $batch is not COMPONENT=DIR"
+    [[ " $components " == *" ${batch%%=*} "* ]] || fail "$suite has no component ${batch%%=*}"
+done
 
 get() {
     local code
@@ -127,30 +131,34 @@ newest() {
 }
 
 shopt -s nullglob
-new=("$debs"/*.deb)
-[ ${#new[@]} -gt 0 ] || fail "no packages in $debs"
 : > "$work/new"
-for deb in "${new[@]}"; do
-    read -r package arch version < <(describe "$deb")
-    if [[ $repository_packages == *" $package "* ]] && [ "$component" != main ]; then
-        fail "$package belongs in main, not $component"
-    fi
-    echo "$package $arch $version $deb" >> "$work/new"
+for batch in "${batches[@]}"; do
+    component=${batch%%=*} debs=${batch#*=}
+    new=("$debs"/*.deb)
+    [ ${#new[@]} -gt 0 ] || fail "no packages in $debs"
+    : > "$work/batch"
+    for deb in "${new[@]}"; do
+        read -r package arch version < <(describe "$deb")
+        if [[ $repository_packages == *" $package "* ]] && [ "$component" != main ]; then
+            fail "$package belongs in main, not $component"
+        fi
+        echo "$component $package $arch $version $deb" >> "$work/batch"
+    done
+
+    # One build: on each architecture, its own and the architecture-independent
+    # packages carry one version, the repository packages aside.
+    built=$(awk '$3 != "all" { print $3 }' "$work/batch" | sort -u)
+    for arch in ${built:-all}; do
+        versions=$(awk -v a="$arch" -v skip="$repository_packages" \
+            '($3 == a || $3 == "all") && index(skip, " " $2 " ") == 0 { print $4 }' "$work/batch" | sort -u)
+        [ "$(wc -l <<< "$versions")" -le 1 ] ||
+            fail "the $arch packages for $component carry different versions: $(tr '\n' ' ' <<< "$versions")"
+    done
+    cat "$work/batch" >> "$work/new"
 done
 
-# One build: on each architecture, its own and the architecture-independent
-# packages carry one version, the repository packages aside.
-built=$(awk '$2 != "all" { print $2 }' "$work/new" | sort -u)
-for arch in ${built:-all}; do
-    versions=$(awk -v a="$arch" -v skip="$repository_packages" \
-        '($2 == a || $2 == "all") && index(skip, " " $1 " ") == 0 { print $3 }' "$work/new" | sort -u)
-    [ "$(wc -l <<< "$versions")" -le 1 ] ||
-        fail "the $arch packages carry different versions: $(tr '\n' ' ' <<< "$versions")"
-done
-
-while read -r package arch version deb; do
+while read -r c package arch version deb; do
     sha=$(sha256sum "$deb" | cut -d' ' -f1)
-    c=$component
     same=$(awk -v c="$c" -v p="$package" -v a="$arch" -v v="$version" \
         '$1 == c && $2 == p && $3 == a && $4 == v { print $5 }' "$work/rows")
     if [ -n "$same" ]; then

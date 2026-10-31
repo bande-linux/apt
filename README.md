@@ -14,7 +14,7 @@ One suite, `rolling`, for Debian testing:
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
 | `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande` |
-| `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` | `linux-*-apple-*`, `bande-os-apple` |
+| `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` that built a kernel | `linux-*-apple-*`, `bande-os-apple` |
 
 Each package keeps its newest version only, as in Debian's own suites. Kernel packages carry
 the kernel version in their name, so `apple` keeps the packages of the newest two kernel
@@ -23,15 +23,30 @@ limit. The repository packages (`bande-archive-keyring`, `bande-apt-source`) liv
 
 ## How a publish works
 
-The last job of a source repository's release run dispatches
-[`publish.yml`](.github/workflows/publish.yml) with `repo` (`desktop` or `kernel`) and the run's
-`run_id`. Publishes share the `pages` concurrency group, so they run one at a time. GitHub keeps
-only the newest pending run of a group: when three publishes overlap, the middle one is
-cancelled, and that repository's build arrives with its next run.
+[`publish.yml`](.github/workflows/publish.yml) runs every 30 minutes. The source repositories
+need no publish step and no token for apt: they only upload their artifacts, and apt reads both
+public repositories with its own `github.token`. Its only secret is `APT_SIGNING_KEY`.
+
+0. [`scripts/find-runs.sh`](scripts/find-runs.sh) looks for runs newer than the live archive,
+   whose signature it checks:
+   - desktop: the green `release.yml` push of the highest `vX.Y.Z` tag, against the version of
+     `bande-desktop` in `main`;
+   - kernel: the newest green `follow-debian.yml` run on `main` that uploaded a
+     `bande-version-VERSION` artifact (runs that found nothing new upload none), against the
+     version of `bande-os-apple` in `apple`.
+
+   With nothing new the workflow stops there: no rebuild, no deploy, and no use of the
+   `apt-publish` environment. A desktop and a kernel release found together go out in one
+   publish.
+
+A dispatch with `repo` and `run_id` publishes that run instead of searching. Publishes share
+the `pages` concurrency group, so they run one at a time. GitHub keeps only the newest pending
+run of a group and cancels the one it replaces; that loses nothing, since the next run finds the
+same releases.
 
 1. [`scripts/fetch-run.sh`](scripts/fetch-run.sh) checks the run:
-   - it must come from the repository's release workflow and end in success (it waits for the
-     run to finish);
+   - it must come from the repository's release workflow and end in success (for a run given
+     by hand it waits for the run to finish);
    - a desktop run must be the `push` of a `vX.Y.Z` tag that points at the run's commit; a
      desktop push to `main` is refused;
    - a kernel run must be a `schedule` or `workflow_dispatch` run on `main`;
@@ -41,13 +56,14 @@ cancelled, and that repository's build arrives with its next run.
    and `all`; the kernel uploads `arm64`. It refuses:
    - package names outside the repository's list;
    - a package filed under another architecture's artifact;
-   - versions of the wrong form: exactly the tag's `X.Y.Z` for the desktop,
-     `<debian-version>+bandeN` for the kernel;
+   - versions other than the run's: exactly the tag's `X.Y.Z` for the desktop, and for the
+     kernel the version its one `bande-version-VERSION` artifact names, of the form
+     `<debian-version>+bandeN`;
    - an incomplete architecture: one that lacks a package another architecture carries.
 2. [`scripts/rebuild.sh`](scripts/rebuild.sh) rebuilds the whole archive with reprepro in a fresh
    database:
    - its input is the live site, whose `InRelease` signatures, `Packages` and pool checksums are
-     all verified, plus the new packages;
+     all verified, plus the new packages of each run (`--add COMPONENT=DIR`, once per run);
    - a component or architecture that the live `Release` does not list yet starts empty;
    - on each architecture, the new packages (with the architecture-independent ones) must
      carry one version, the repository packages aside;
@@ -60,9 +76,8 @@ cancelled, and that repository's build arrives with its next run.
 
 No state is kept between runs: the live site is the source of truth.
 
-- **Access:** the GitHub App whose client id and key are `DESKTOP_READER_CLIENT_ID` and
-  `DESKTOP_READER_KEY` must be installed on both `desktop` and `kernel`, with Actions and
-  Contents read access. The publish asks it for a token limited to the one repository.
+- **Access:** `github.token` with `actions: read` and `contents: read`; `desktop` and `kernel`
+  are public, so no other token or GitHub App is involved.
 - **Signing:** the signing subkey is a secret of the `apt-publish` environment, which only `main`
   can use.
 - **Deploy:** the site is deployed with `actions/deploy-pages`.
@@ -73,25 +88,27 @@ No state is kept between runs: the live site is the source of truth.
 ## First publish
 
 The site holds no archive yet, so the first publish must say so; every later one refuses to run
-without a live, signed `InRelease`.
+without a live, signed `InRelease`. Until then, a scheduled run that finds a release fails at the
+rebuild, so make the first publish once the first desktop tag is green:
 
-1. Find the green desktop `release.yml` run of a `vX.Y.Z` tag push:
+1. Publish everything released so far:
 
    ```bash
-   gh run list -R bande-linux/desktop -w release.yml -e push -s success -L 5
+   gh workflow run publish.yml -R bande-linux/apt -f initial=true
    ```
 
-2. Publish it:
+   Or publish one run, found with
+   `gh run list -R bande-linux/desktop -w release.yml -e push -s success -L 5`:
 
    ```bash
    gh workflow run publish.yml -R bande-linux/apt -f repo=desktop -f run_id=RUN_ID -f initial=true
    ```
 
-3. Check <https://bande-linux.github.io/apt/dists/rolling/InRelease> and the
+2. Check <https://bande-linux.github.io/apt/dists/rolling/InRelease> and the
    `apt-source-VERSION` release, then `apt install bande-desktop` in a fresh Debian testing
    on amd64 and arm64.
 
-The kernel's first publish needs no `initial`: it adds `apple` to the live archive.
+A kernel that arrives later needs no `initial`: it adds `apple` to the live archive.
 
 ## Signing keys
 
@@ -122,6 +139,6 @@ tests/run-all.sh
 ```
 
 The tests build throwaway keys and packages for amd64 and arm64, serve sites and a fake GitHub
-API over local HTTP, and check both source repositories, publishing to both components, the
+API over local HTTP, and check finding new releases, both source repositories, publishing to both components, the
 kernel limit, tampering and forged signatures. They also check rotation, and that apt itself
 updates from and downloads out of the result, without touching the machine's own apt state.
