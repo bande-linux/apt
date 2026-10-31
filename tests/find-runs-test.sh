@@ -6,24 +6,24 @@ conf=$scratch/conf
 make_conf "$conf"
 export GH_TOKEN=test
 
-# A live archive serving desktop 0.1.0, kernel 7.2.12-1+bande1 and repository
-# packages 1.0, which has taken apps run 60.
+# A live archive serving desktop 0.1.0, kernel 7.2.12-1+bande1, bande-weather
+# 0.1.0 and repository packages 1.0, which has refused apps run 60.
 for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop" $p 0.1.0 all; done
 make_deb "$scratch/kernel" linux-image-7.2.12-apple-arm64-16k 7.2.12-1+bande1 arm64
 make_deb "$scratch/kernel" bande-os-apple 7.2.12-1+bande1 arm64
+for a in amd64 arm64; do make_deb "$scratch/apps" bande-weather 0.1.0 $a; done
 REPOSITORY_VERSION=1.0 "$root/scripts/build-repository-packages.sh" "$scratch/apt" > /dev/null
 empty=$(mktemp -d -p "$scratch")
 "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$empty")" \
     --add desktop:main="$scratch/desktop" --add kernel:apple="$scratch/kernel" --processed apps=60 \
-    --add-each apt:main="$scratch/apt" \
+    --add-each apt:main="$scratch/apt" --add-each apps:main="$scratch/apps" \
     --out "$scratch/site" > /dev/null
 live=$(serve "$scratch/site")
 
 # api DIR: the GitHub API of both repositories. $desktop_runs lists the
 # desktop's release runs as ID:TAG:CONCLUSION, newest first; $kernel_runs the
 # kernel's runs with a version artifact as ID:VERSION:CONCLUSION[:EVENT];
-# $apps_runs the apps' build runs as ID:CONCLUSION:EVENT:BRANCH:DEBS:AGE, DEBS
-# yes when it uploaded bande-debs-*, AGE in days.
+# $apps_runs the apps' build runs as ID:CONCLUSION:EVENT:TAG.
 api() {
     local d=$1 run id tag version conclusion event base=$1/repos/bande-linux
     mkdir -p "$base/desktop/actions/workflows/release.yml" "$base/kernel/actions/runs" "$base/kernel/actions/artifacts"
@@ -47,18 +47,10 @@ api() {
     mkdir -p "$base/apps/actions/workflows/build.yml"
     echo '{"workflow_runs": []}' > "$base/apps/actions/workflows/build.yml/runs"
     for run in ${apps_runs:-}; do
-        IFS=: read -r id conclusion event branch debs age <<< "$run"
-        jq --argjson i "$id" --arg c "$conclusion" --arg e "$event" --arg b "$branch" \
-            --arg t "$(date -u -d "$age days ago" +%Y-%m-%dT%H:%M:%SZ)" \
-            '.workflow_runs += [{id: $i, event: $e, head_branch: $b, conclusion: $c, created_at: $t}]' \
+        IFS=: read -r id conclusion event tag <<< "$run"
+        jq --argjson i "$id" --arg c "$conclusion" --arg e "$event" --arg t "$tag" \
+            '.workflow_runs += [{id: $i, event: $e, head_branch: $t, conclusion: $c}]' \
             "$base/apps/actions/workflows/build.yml/runs" > "$d/x" && mv "$d/x" "$base/apps/actions/workflows/build.yml/runs"
-        mkdir -p "$base/apps/actions/runs/$id"
-        if [ "$debs" = yes ]; then
-            echo '{"artifacts": [{"name": "app-a-arm64", "expired": false}, {"name": "bande-debs-arm64", "expired": false},
-                {"name": "bande-debs-amd64", "expired": false}]}' > "$base/apps/actions/runs/$id/artifacts"
-        else
-            echo '{"artifacts": []}' > "$base/apps/actions/runs/$id/artifacts"
-        fi
     done
     export GITHUB_API_URL
     GITHUB_API_URL=$(serve "$d")
@@ -98,17 +90,28 @@ d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" kernel_runs="40:7
 check "an empty site takes every release" find_runs "$d/out" "$(serve "$empty")"
 check "both are printed for it" diff <(printf 'desktop 30\nkernel 40\n') "$d/out"
 
-d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" apps_runs="61:success:push:main:yes:0" api "$d"
-check "an apps run is found" find_runs "$d/out"
-check "only the apps run is printed" diff <(echo "apps 61") "$d/out"
+d=$(mktemp -d -p "$scratch"); apps_runs="61:success:push:weather-v0.2.0 59:success:push:weather-v0.1.0" api "$d"
+check "a new app tag is found" find_runs "$d/out"
+check "only that apps run is printed" diff <(echo "apps 61") "$d/out"
+d=$(mktemp -d -p "$scratch"); apps_runs="59:success:push:weather-v0.1.0" api "$d"
+check "a published app tag is not found again" find_runs "$d/out"
+check "nothing is printed for it" test ! -s "$d/out"
+check "it says it is published" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'bande-weather 0.1.0 (run 59) is published'"
 d=$(mktemp -d -p "$scratch")
-apps_runs="63:success:workflow_dispatch:main:yes:0 62:success:push:main:yes:1 60:success:push:main:yes:2" api "$d"
-check "every apps run not yet taken is found" find_runs "$d/out"
-check "the taken one is left out" diff <(printf 'apps 63\napps 62\n') "$d/out"
+apps_runs="63:success:push:weather-v0.2.0 62:success:push:weather-v0.10.0 64:success:push:clock-face-v0.1.0" api "$d"
+check "the highest tag of each app is found" find_runs "$d/out"
+check "one run per app, sorted by app" diff <(printf 'apps 64\napps 62\n') "$d/out"
+d=$(mktemp -d -p "$scratch"); apps_runs="60:success:push:weather-v0.4.0 65:success:push:weather-v0.3.0" api "$d"
+check "a refused apps run is not taken again" find_runs "$d/out"
+check "nor is an older tag taken in its place" test ! -s "$d/out"
+check "it says it was refused" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'run 60) was refused before'"
 d=$(mktemp -d -p "$scratch")
-apps_runs="64:failure:push:main:yes:0 65:success:push:ci-test:yes:0 66:success:schedule:main:yes:0 67:success:push:main:no:0 68:success:push:main:yes:20" api "$d"
-check "red, branch, scheduled, empty and old apps runs are ignored" find_runs "$d/out"
+apps_runs="66:failure:push:clock-v0.1.0 67:success:workflow_dispatch:clock-v0.1.0 68:success:push:main 69:success:push:ci-test 70:success:push:clock-v0.1 71:success:schedule:clock-v0.2.0" api "$d"
+check "red, dispatched, branch, malformed and scheduled apps runs are ignored" find_runs "$d/out"
 check "none of them is printed" test ! -s "$d/out"
+d=$(mktemp -d -p "$scratch"); apps_runs="72:success:push:weather-v0.1.0" api "$d"
+check "an empty site takes every app" find_runs "$d/out" "$(serve "$empty")"
+check "the app is printed for it" diff <(echo "apps 72") "$d/out"
 
 d=$(mktemp -d -p "$scratch"); mkdir -p "$d/repos/bande-linux/kernel/actions/runs" "$d/repos/bande-linux/kernel/actions/artifacts"
 jq -n '{artifacts: [{name: "bande-version-7.2.14-1+bande1", expired: false, workflow_run: {id: 41}}]}' \

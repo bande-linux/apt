@@ -10,10 +10,9 @@
 # - kernel: the newest green follow-debian.yml schedule or dispatch run on main
 #   with a bande-version-VERSION artifact; the live one is bande-os-apple's in
 #   apple;
-# - apps: every green build.yml push or dispatch run on main of the last
-#   $FIND_RUNS_DAYS days (default 14) that uploaded packages and is not in the
-#   live state/processed. Each run carries only the apps it built, so all of
-#   them are taken; rebuild.sh skips app versions already published.
+# - apps: per app, the green build.yml push of its highest <app>-vX.Y.Z tag,
+#   when X.Y.Z is newer than the live bande-<app>'s in main and the run is not
+#   in the live state/processed, which holds the runs already taken or refused.
 # fetch-run.sh checks each printed run in full. Needs GH_TOKEN; both
 # repositories are public.
 set -euo pipefail
@@ -21,7 +20,6 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 live=${1%/} conf=${2:-$here/../conf}
 api=${GITHUB_API_URL:-https://api.github.com}
-days=${FIND_RUNS_DAYS:-14}
 fail() { echo "find-runs: $*" >&2; exit 1; }
 
 call() {
@@ -140,16 +138,25 @@ if [ -e "$work/Release" ]; then
         *) fail "$live/state/processed answered HTTP $code" ;;
     esac
 fi
-since=$(date -u -d "$days days ago" +%Y-%m-%dT%H:%M:%SZ)
-listing "$api/repos/bande-linux/apps/actions/workflows/build.yml/runs?branch=main&status=success&created=%3E%3D$since&per_page=100" \
+listing "$api/repos/bande-linux/apps/actions/workflows/build.yml/runs?event=push&status=success&per_page=100" \
     "$work/apps.json" '{"workflow_runs": []}' "the apps' build runs"
-while read -r id; do
-    if grep -qx "apps $id" "$work/processed"; then continue; fi
-    call "$api/repos/bande-linux/apps/actions/runs/$id/artifacts?per_page=100" > "$work/artifacts.json" ||
-        fail "cannot list the artifacts of apps run $id"
-    if jq -e '[.artifacts[] | select((.expired | not) and (.name == "bande-debs-arm64" or .name == "bande-debs-amd64"))]
-        | length == 2' "$work/artifacts.json" > /dev/null; then
+declare -A app_run app_version
+while read -r id ref; do
+    [[ ${ref#refs/tags/} =~ ^([a-z0-9][a-z0-9-]*)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || continue
+    app=${BASH_REMATCH[1]} version=${BASH_REMATCH[2]}
+    if [ -z "${app_version[$app]:-}" ] || dpkg --compare-versions "$version" gt "${app_version[$app]}"; then
+        app_run[$app]=$id app_version[$app]=$version
+    fi
+done < <(jq -r '.workflow_runs[] | select(.event == "push" and .conclusion == "success") | "\(.id) \(.head_branch)"' \
+    "$work/apps.json")
+for app in $(printf '%s\n' "${!app_run[@]}" | sort); do
+    id=${app_run[$app]} version=${app_version[$app]}
+    served=$(live_version main arm64 "bande-$app")
+    if ! newer "$version" "$served"; then
+        echo "find-runs: bande-$app $version (run $id) is published" >&2
+    elif grep -qx "apps $id" "$work/processed"; then
+        echo "find-runs: bande-$app $version (run $id) was refused before" >&2
+    else
         echo "apps $id"
     fi
-done < <(jq -r --arg since "$since" '.workflow_runs[] | select(.head_branch == "main" and .conclusion == "success"
-    and (.event == "push" or .event == "workflow_dispatch") and .created_at >= $since) | .id' "$work/apps.json")
+done

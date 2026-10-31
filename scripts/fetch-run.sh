@@ -6,9 +6,9 @@
 #   packages carry X.Y.Z.
 # - kernel: a schedule or dispatch on main, naming its version with one
 #   bande-version-VERSION artifact, which its packages carry.
-# - apps: a push or dispatch on main; each package is bande-<dir> for an
-#   apps/<dir> at the run's commit, never a name of the desktop's, and carries
-#   its own <cargo>+gitDATE.COUNT.SHA, the same on both architectures.
+# - apps: the push of an <app>-vX.Y.Z tag that points at the run's commit, for
+#   an apps/<app> at that commit; it carries bande-<app> alone, at X.Y.Z, never
+#   a name of the desktop's. Dispatch runs are test builds and never published.
 # Then downloads its bande-debs-ARCH artifacts into OUT_DIR and checks that they
 # carry only the repository's own package names, every architecture it builds
 # and the same packages for each. A package OUT_DIR already holds at a newer
@@ -50,11 +50,9 @@ case $source_repo in
         ;;
     apps)
         workflow=.github/workflows/build.yml
-        events=(push workflow_dispatch)
-        names=()
+        events=(push)
         component=main
         architectures=(amd64 arm64)
-        version_form='^[0-9][^+ ]*\+git[0-9]{8}\.[0-9]+\.[0-9a-f]{7}$'
         ;;
     *) fail "unknown repository $source_repo; the archive takes desktop, kernel and apps" ;;
 esac
@@ -73,10 +71,17 @@ read -r event path ref sha owner < <(jq -r '[.event, .path, .head_branch, .head_
 [ "$path" = "$workflow" ] || fail "run $run is from $path, not $workflow"
 [ "$owner" = "$repo" ] || fail "run $run built $owner, not $repo"
 [[ " ${events[*]} " == *" $event "* ]] || fail "run $run was started by $event; $source_repo publishes from ${events[*]}"
-if [ "$source_repo" = desktop ]; then
+if [ "$source_repo" = desktop ] || [ "$source_repo" = apps ]; then
     tag=${ref#refs/tags/}
-    [[ $tag =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || fail "run $run built $ref; the desktop publishes vX.Y.Z tags"
-    want_version=${BASH_REMATCH[1]}
+    if [ "$source_repo" = desktop ]; then
+        [[ $tag =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || fail "run $run built $ref; the desktop publishes vX.Y.Z tags"
+        want_version=${BASH_REMATCH[1]}
+    else
+        [[ $tag =~ ^([a-z0-9][a-z0-9-]*)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]] ||
+            fail "run $run built $ref; the apps publish <app>-vX.Y.Z tags"
+        app=${BASH_REMATCH[1]} want_version=${BASH_REMATCH[2]}
+        names=("bande-$app")
+    fi
     call "$api/repos/$repo/git/ref/tags/$tag" > "$work/tag.json" || fail "tag $tag does not exist"
     read -r type object < <(jq -r '[.object.type, .object.sha] | @tsv' "$work/tag.json")
     if [ "$type" = tag ]; then
@@ -114,7 +119,8 @@ if [ "$source_repo" = kernel ]; then
 fi
 if [ "$source_repo" = apps ]; then
     call "$api/repos/$repo/contents/apps?ref=$sha" > "$work/apps.json" || fail "cannot list apps/ at $sha"
-    mapfile -t names < <(jq -r '.[] | select(.type == "dir") | "bande-" + .name' "$work/apps.json")
+    jq -e --arg a "$app" 'any(.[]; .type == "dir" and .name == $a)' "$work/apps.json" > /dev/null ||
+        fail "tag $tag names $app, but the run's commit has no apps/$app"
     call "$api/repos/bande-linux/desktop/contents/packaging?ref=main" > "$work/packaging.json" ||
         fail "cannot list the desktop's packaging/"
     reserved+="$(jq -r '.[] | select(.type == "dir") | .name' "$work/packaging.json" | tr '\n' ' ')"
@@ -142,8 +148,8 @@ for arch in "${architectures[@]}"; do
         [[ $repository_packages != *" $package "* ]] || fail "$package is built by apt itself; $source_repo may not publish it"
         if [ "$source_repo" = apps ]; then
             [[ $reserved != *" $package "* ]] || fail "$package is the desktop's; an app may not take it"
-            [[ $version =~ $version_form ]] || fail "$package carries version $version, not <cargo>+gitDATE.COUNT.SHA"
-        elif [ "$version" != "$want_version" ]; then
+        fi
+        if [ "$version" != "$want_version" ]; then
             fail "$package carries version $version, the run publishes $want_version"
         fi
         echo "$arch $package $version" >> "$work/names"

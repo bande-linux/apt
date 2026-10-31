@@ -6,12 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       repo:
-        description: Repository of the run to publish (desktop or kernel); empty finds new runs itself
+        description: Repository of the run to publish (desktop, kernel or apps); empty finds new runs itself
         required: false
         type: string
         default: ''
       run_id:
-        description: Its release run (desktop release.yml on a vX.Y.Z tag, kernel follow-debian.yml)
+        description: Its release run (desktop release.yml on a vX.Y.Z tag, kernel follow-debian.yml, apps build.yml on an <app>-vX.Y.Z tag)
         required: false
         type: string
         default: ''
