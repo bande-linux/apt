@@ -26,6 +26,24 @@ call() {
         -H 'X-GitHub-Api-Version: 2022-11-28' "$@"
 }
 
+# listing URL OUT EMPTY WHAT: fetches an API listing into OUT. A repository or
+# workflow that does not exist (yet) answers 404: OUT gets EMPTY, which means
+# nothing new from that source. Network errors and other answers fail.
+listing() {
+    local code
+    code=$(curl -sSL --retry 3 -o "$2" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" \
+        -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "$1") ||
+        fail "cannot list $4"
+    case $code in
+        200) ;;
+        404)
+            echo "find-runs: $4 not found (HTTP 404); nothing new from it" >&2
+            echo "$3" > "$2"
+            ;;
+        *) fail "listing $4 answered HTTP $code" ;;
+    esac
+}
+
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 gpg --batch --quiet --dearmor < "$conf/archive-key.asc" > "$work/keyring.gpg"
@@ -57,8 +75,8 @@ live_version() {
 
 newer() { [ -z "$2" ] || dpkg --compare-versions "$1" gt "$2"; }
 
-call "$api/repos/bande-linux/desktop/actions/workflows/release.yml/runs?event=push&status=success&per_page=100" \
-    > "$work/desktop.json" || fail "cannot list the desktop's release runs"
+listing "$api/repos/bande-linux/desktop/actions/workflows/release.yml/runs?event=push&status=success&per_page=100" \
+    "$work/desktop.json" '{"workflow_runs": []}' "the desktop's release runs"
 desktop_run='' desktop_version=''
 while read -r id ref; do
     [[ ${ref#refs/tags/} =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || continue
@@ -74,10 +92,12 @@ if [ -n "$desktop_run" ]; then
     else
         echo "find-runs: desktop $desktop_version (run $desktop_run) is published" >&2
     fi
+else
+    echo "find-runs: the desktop has no green vX.Y.Z release run" >&2
 fi
 
-call "$api/repos/bande-linux/kernel/actions/artifacts?per_page=100" > "$work/kernel.json" ||
-    fail "cannot list the kernel's artifacts"
+listing "$api/repos/bande-linux/kernel/actions/artifacts?per_page=100" "$work/kernel.json" '{"artifacts": []}' \
+    "the kernel's artifacts"
 kernel_run='' kernel_version=''
 while read -r id version; do
     call "$api/repos/bande-linux/kernel/actions/runs/$id" > "$work/run.json" || fail "cannot read kernel run $id"
@@ -94,6 +114,8 @@ if [ -n "$kernel_run" ]; then
     else
         echo "find-runs: kernel $kernel_version (run $kernel_run) is published" >&2
     fi
+else
+    echo "find-runs: the kernel has no green run that built a kernel" >&2
 fi
 
 : > "$work/processed"
@@ -107,8 +129,8 @@ if [ -e "$work/Release" ]; then
     esac
 fi
 since=$(date -u -d "$days days ago" +%Y-%m-%dT%H:%M:%SZ)
-call "$api/repos/bande-linux/apps/actions/workflows/build.yml/runs?branch=main&status=success&created=%3E%3D$since&per_page=100" \
-    > "$work/apps.json" || fail "cannot list the apps' build runs"
+listing "$api/repos/bande-linux/apps/actions/workflows/build.yml/runs?branch=main&status=success&created=%3E%3D$since&per_page=100" \
+    "$work/apps.json" '{"workflow_runs": []}' "the apps' build runs"
 while read -r id; do
     if grep -qx "apps $id" "$work/processed"; then continue; fi
     call "$api/repos/bande-linux/apps/actions/runs/$id/artifacts?per_page=100" > "$work/artifacts.json" ||

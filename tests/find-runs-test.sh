@@ -108,6 +108,33 @@ apps_runs="64:failure:push:main:yes:0 65:success:push:ci-test:yes:0 66:success:s
 check "red, branch, scheduled, empty and old apps runs are ignored" find_runs "$d/out"
 check "none of them is printed" test ! -s "$d/out"
 
+d=$(mktemp -d -p "$scratch"); mkdir -p "$d/repos/bande-linux/kernel/actions/runs" "$d/repos/bande-linux/kernel/actions/artifacts"
+jq -n '{artifacts: [{name: "bande-version-7.2.14-1+bande1", expired: false, workflow_run: {id: 41}}]}' \
+    > "$d/repos/bande-linux/kernel/actions/artifacts/index.html"
+jq -n '{path: ".github/workflows/follow-debian.yml", head_branch: "main", event: "schedule", conclusion: "success"}' \
+    > "$d/repos/bande-linux/kernel/actions/runs/41"
+GITHUB_API_URL=$(serve "$d")
+check "repositories that do not exist yet are nothing new" find_runs "$d/out"
+check "the others are still found" diff <(echo "kernel 41") "$d/out"
+check "it says which are missing" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q \"the desktop's release runs not found (HTTP 404)\""
+broken=$(mktemp -d -p "$scratch")
+cat > "$broken/server.py" <<'PY2'
+import http.server, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(500); self.end_headers()
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY2
+port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+python3 -I "$broken/server.py" "$port" &
+echo $! >> "$scratch/servers"
+sleep 0.5
+GITHUB_API_URL=http://127.0.0.1:$port
+refuses "a server error still fails" "answered HTTP 500" find_runs "$d/out"
+GITHUB_API_URL=http://127.0.0.1:1
+refuses "a network error still fails" "cannot list" find_runs "$d/out"
+
 forged=$scratch/forged
 (make_conf "$forged" && "$root/scripts/rebuild.sh" --conf "$forged" --initial --live "$(serve "$empty")" \
     --add desktop:main="$scratch/desktop" --out "$scratch/forged-site") > /dev/null 2>&1
