@@ -1,6 +1,7 @@
 ca-certificates
 curl
 dpkg-dev
+git
 gnupg
 gpgv
 jq

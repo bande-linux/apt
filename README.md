@@ -20,7 +20,21 @@ One suite, `rolling`, for Debian testing:
 Each package keeps its newest version only, as in Debian's own suites. Kernel packages carry
 the kernel version in their name, so `apple` keeps the packages of the newest two kernel
 versions and drops older ones; kernel debs are large and the site must stay under the Pages
-limit. The repository packages (`bande-archive-keyring`, `bande-apt-source`) live in `main`.
+limit.
+
+## The repository packages
+
+`bande-archive-keyring` (the keys of [`conf/archive-key.asc`](conf/archive-key.asc) and an APT
+pin that lets the archive provide only `bande-*`, `xdg-desktop-portal-bande` and
+`linux-*-apple-*`) and `bande-apt-source` (`rolling main apple`) are built by this repository,
+from [`packaging/`](packaging), with
+[`scripts/build-repository-packages.sh`](scripts/build-repository-packages.sh). No source
+repository may publish them, so the archive depends on none of them.
+
+- Their version is `1.N`, where N counts the commits that touched `packaging/`, the keys or the
+  build script. Change any of them and the next publish carries a new version.
+- The same commit builds byte-identical packages. Every publish adds them to `main`, for every
+  architecture; one already published at its version is kept.
 
 Each package name belongs to one source repository. The site keeps the owners in
 `state/owners`, and a publish refuses a name another source already publishes. An app can never
@@ -33,7 +47,9 @@ need no publish step and no token for apt: they only upload their artifacts, and
 public repositories with its own `github.token`. Its only secret is `APT_SIGNING_KEY`.
 
 0. [`scripts/find-runs.sh`](scripts/find-runs.sh) looks for runs newer than the live archive,
-   whose signature it checks:
+   whose signature it checks. A source repository that does not exist yet, or has no green run,
+   is nothing new:
+   - apt: repository packages of a version newer than the live `bande-archive-keyring`;
    - desktop: the green `release.yml` push of the highest `vX.Y.Z` tag, against the version of
      `bande-desktop` in `main`;
    - kernel: the newest green `follow-debian.yml` run on `main` that uploaded a
@@ -86,7 +102,7 @@ same releases.
      build, `--add-each apps:main=DIR` for apps;
    - a component or architecture that the live `Release` does not list yet starts empty;
    - for a desktop or kernel build, the new packages on each architecture (with the
-     architecture-independent ones) must carry one version, the repository packages aside, and
+     architecture-independent ones) must carry one version, and
      it refuses a version older than the live one and changed contents under a published
      version;
    - for apps, each package stands alone: one whose version is already published, or older, is
@@ -107,31 +123,16 @@ No state is kept between runs: the live site is the source of truth.
 - **Bootstrap release:** when the repository packages reach a new version,
   [`scripts/bootstrap-release.sh`](scripts/bootstrap-release.sh) creates the GitHub release
   `apt-source-VERSION`, which users download in the first install step.
+- **Verify:** after each deploy, a `debian:testing` container on amd64 and on arm64 checks that
+  the live `key.asc` is the archive key, installs `bande-archive-keyring` and `bande-apt-source`
+  from the live archive, and updates through the source they install.
 
 ## First publish
 
-The site holds no archive yet, so the first publish must say so; every later one refuses to run
-without a live, signed `InRelease`. Until then, a scheduled run that finds a release fails at the
-rebuild, so make the first publish once the first desktop tag is green:
-
-1. Publish everything released so far:
-
-   ```bash
-   gh workflow run publish.yml -R bande-linux/apt -f initial=true
-   ```
-
-   Or publish one run, found with
-   `gh run list -R bande-linux/desktop -w release.yml -e push -s success -L 5`:
-
-   ```bash
-   gh workflow run publish.yml -R bande-linux/apt -f repo=desktop -f run_id=RUN_ID -f initial=true
-   ```
-
-2. Check <https://bande-linux.github.io/apt/dists/rolling/InRelease> and the
-   `apt-source-VERSION` release, then `apt install bande-desktop` in a fresh Debian testing
-   on amd64 and arm64.
-
-A kernel that arrives later needs no `initial`: it adds `apple` to the live archive.
+Nothing special: the first publish can come from any source, or from the repository packages
+alone. A site that serves neither `dists/rolling/InRelease` nor `key.asc` has never been
+published, and [`scripts/rebuild.sh`](scripts/rebuild.sh) starts the archive. A site that
+serves `key.asc` but no `InRelease` is broken, and the publish refuses to build over it.
 
 ## Signing keys
 

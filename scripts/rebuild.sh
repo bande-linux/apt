@@ -1,6 +1,6 @@
 #!/bin/bash
 # Usage: rebuild.sh --live URL --add|--add-each SOURCE:COMPONENT=DIR [...] --out DIR
-#                   [--processed SOURCE=ID,...] [--conf DIR] [--cache DIR] [--initial]
+#                   [--processed SOURCE=ID,...] [--conf DIR] [--cache DIR]
 # Rebuilds the whole archive from the live, signature-checked site plus the
 # packages in each DIR, which come from the repository SOURCE and go to its
 # COMPONENT (main or apple), signs it with the keys in conf/signing-keys (secret
@@ -17,10 +17,15 @@
 # package of another source's name is refused. And state/processed, the runs
 # of each source already taken (--processed adds to it), which find-runs.sh
 # reads.
+#
+# A site that serves neither dists/rolling/InRelease nor key.asc has never been
+# published, and the archive starts empty. One that serves key.asc but no
+# InRelease is refused, so a broken site is never published over.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-# The keyring and source packages live in main and carry their own version.
+# The keyring and source packages are built by this repository (source apt) and
+# live in main.
 repository_packages=" bande-archive-keyring bande-apt-source "
 # Kernel packages carry the kernel version in their name, so each kernel stays
 # until it is dropped; keep_kernels bounds how many fit within the Pages limit.
@@ -29,7 +34,7 @@ keep_kernels=2
 
 conf=$here/../conf
 site_template=$here/../site
-live='' out='' cache='' initial=0
+live='' out='' cache=''
 batches=() processed=()
 while [ $# -gt 0 ]; do
     case $1 in
@@ -40,7 +45,6 @@ while [ $# -gt 0 ]; do
         --out) out=$2; shift 2 ;;
         --conf) conf=$2; shift 2 ;;
         --cache) cache=$2; shift 2 ;;
-        --initial) initial=1; shift ;;
         *) echo "rebuild: unknown argument $1" >&2; exit 2 ;;
     esac
 done
@@ -136,8 +140,10 @@ if get "$live/dists/$suite/InRelease" "$dist/InRelease"; then
     for state in owners processed; do
         get "$live/state/$state" "$work/$state" || : > "$work/$state"
     done
+elif get "$live/key.asc" "$work/live-key.asc"; then
+    fail "$live serves key.asc but no dists/$suite/InRelease; refusing to start the archive over"
 else
-    [ "$initial" = 1 ] || fail "$live/dists/$suite/InRelease does not exist; pass --initial for the first publish"
+    echo "rebuild: $live has never been published; starting the archive"
 fi
 touch "$work/owners" "$work/processed"
 sort -u -o "$work/rows" "$work/rows"
@@ -161,8 +167,9 @@ for batch in "${batches[@]}"; do
     : > "$work/batch"
     for deb in "${new[@]}"; do
         read -r package arch version < <(describe "$deb")
-        if [[ $repository_packages == *" $package "* ]] && [ "$component" != main ]; then
-            fail "$package belongs in main, not $component"
+        if [[ $repository_packages == *" $package "* ]]; then
+            [ "$source" = apt ] || fail "$package is built by apt itself, not $source"
+            [ "$component" = main ] || fail "$package belongs in main, not $component"
         fi
         owner=$(awk -v p="$package" '$1 == p { print $2; exit }' "$work/claims")
         [ -z "$owner" ] || [ "$owner" = "$source" ] || fail "$package is published from $owner, not $source"
@@ -171,12 +178,11 @@ for batch in "${batches[@]}"; do
     awk -v s="$source" '{ print $3, s }' "$work/batch" | sort -u >> "$work/claims"
 
     # One build: on each architecture, its own and the architecture-independent
-    # packages carry one version, the repository packages aside.
+    # packages carry one version.
     built=$(awk '$4 != "all" { print $4 }' "$work/batch" | sort -u)
     for arch in ${built:-all}; do
         [ "$mode" = one ] || break
-        versions=$(awk -v a="$arch" -v skip="$repository_packages" \
-            '($4 == a || $4 == "all") && index(skip, " " $3 " ") == 0 { print $5 }' "$work/batch" | sort -u)
+        versions=$(awk -v a="$arch" '$4 == a || $4 == "all" { print $5 }' "$work/batch" | sort -u)
         [ "$(wc -l <<< "$versions")" -le 1 ] ||
             fail "the $arch packages for $component carry different versions: $(tr '\n' ' ' <<< "$versions")"
     done

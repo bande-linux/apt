@@ -28,12 +28,21 @@ kernel() {
 d1=0.0.0+git20261029.1.aaaaaaa
 
 empty=$(mktemp -d -p "$scratch")
-refuses "first publish needs --initial" "pass --initial" \
-    rebuild --live "$(serve "$empty")" --add desktop:main="$scratch/none" --out "$scratch/x"
+half=$(mktemp -d -p "$scratch")
+cp "$conf/archive-key.asc" "$half/key.asc"
+REPOSITORY_VERSION=1.0 "$root/scripts/build-repository-packages.sh" "$scratch/in-apt" > /dev/null
+refuses "a site with key.asc but no InRelease is refused" "refusing to start the archive over" \
+    rebuild --live "$(serve "$half")" --add-each apt:main="$scratch/in-apt" --out "$scratch/x"
+
+kernel k0 7.2.12 7.2.12-1+bande1
+check "a first publish can be the kernel alone" rebuild --live "$(serve "$empty")" --add kernel:apple="$scratch/in-k0" \
+    --add-each apt:main="$scratch/in-apt" --out "$scratch/site-k0"
+check "it carries the kernel" has "$scratch/site-k0" apple arm64 bande-os-apple=7.2.12-1+bande1
+check "and the repository packages for both architectures" both "$scratch/site-k0" main bande-archive-keyring=1.0
 
 desktop 1 "$d1"
-for p in bande-archive-keyring bande-apt-source; do make_deb "$scratch/in-1" $p 1.0 all; done
-check "initial desktop publish" rebuild --initial --live "$(serve "$empty")" --add desktop:main="$scratch/in-1" --out "$scratch/site-1"
+check "a first desktop publish" rebuild --live "$(serve "$empty")" --add desktop:main="$scratch/in-1" \
+    --add-each apt:main="$scratch/in-apt" --out "$scratch/site-1"
 check "main carries the build on amd64 and arm64" both "$scratch/site-1" main "bande-compositor=$d1"
 check "main carries the architecture-independent packages on both" both "$scratch/site-1" main "bande-desktop=$d1"
 check "main carries the repository packages" both "$scratch/site-1" main bande-apt-source=1.0
@@ -98,10 +107,20 @@ refuses "an architecture-independent package of another version is refused" "arm
 make_deb "$scratch/in-mixed" bande-compositor 0.0.0+git20261031.5.ccccccc amd64
 make_deb "$scratch/in-mixed" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
 make_deb "$scratch/in-mixed" bande-apt-source 1.1 all
-check "repository packages carry their own version" rebuild --live "$live" --add desktop:main="$scratch/in-mixed" --out "$scratch/mixed"
+refuses "a source may not publish the repository packages" "bande-apt-source is built by apt itself, not desktop" \
+    rebuild --live "$live" --add desktop:main="$scratch/in-mixed" --out "$scratch/mixed"
 make_deb "$scratch/in-misplaced" bande-archive-keyring 1.1 all
 refuses "repository packages stay in main" "belongs in main" \
-    rebuild --live "$live" --add kernel:apple="$scratch/in-misplaced" --out "$scratch/misplaced"
+    rebuild --live "$live" --add-each apt:apple="$scratch/in-misplaced" --out "$scratch/misplaced"
+REPOSITORY_VERSION=1.0 SOURCE_DATE_EPOCH=86400 "$root/scripts/build-repository-packages.sh" "$scratch/in-apt-rebuilt" > /dev/null
+check "rebuilt repository packages of the same version are skipped" rebuild --live "$live" \
+    --add-each apt:main="$scratch/in-apt-rebuilt" --out "$scratch/apt-same"
+check "the published ones stay" cmp "$(find "$site/pool" -name 'bande-archive-keyring_1.0_all.deb')" \
+    "$(find "$scratch/apt-same/pool" -name 'bande-archive-keyring_1.0_all.deb')"
+REPOSITORY_VERSION=1.1 "$root/scripts/build-repository-packages.sh" "$scratch/in-apt-new" > /dev/null
+check "a new version of the repository packages" rebuild --live "$live" --add-each apt:main="$scratch/in-apt-new" --out "$scratch/apt-new"
+check "the keyring is 1.1" both "$scratch/apt-new" main bande-archive-keyring=1.1
+check "the source package is 1.1" both "$scratch/apt-new" main bande-apt-source=1.1
 
 desktop 5 0.0.0+git20261031.5.eeeeeee
 kernel k4 7.3.2 7.3.2-1+bande1
@@ -109,7 +128,7 @@ check "one publish takes a desktop and a kernel" rebuild --live "$live" --add de
 check "main takes the desktop" both "$scratch/both" main bande-compositor=0.0.0+git20261031.5.eeeeeee
 check "apple takes the kernel" has "$scratch/both" apple arm64 linux-image-7.3.2-apple-arm64-16k=7.3.2-1+bande1
 check "the kernel limit holds across both" lacks "$scratch/both" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+bande1
-refuses "every batch is checked" "belongs in main" \
+refuses "every batch is checked" "built by apt itself, not kernel" \
     rebuild --live "$live" --add desktop:main="$scratch/in-5" --add kernel:apple="$scratch/in-misplaced" --out "$scratch/both-bad"
 
 a1=0.1.0+git20261101.3.aaaaaaa a2=0.2.0+git20261101.4.bbbbbbb
@@ -148,7 +167,7 @@ partial_conf=$scratch/partial-conf
 cp -r "$conf" "$partial_conf"
 sed -i 's/^Architectures: .*/Architectures: arm64/; s/^Components: .*/Components: main/' "$partial_conf/distributions"
 (export GNUPGHOME=$conf/gnupg
- "$root/scripts/rebuild.sh" --conf "$partial_conf" --initial --live "$(serve "$empty")" \
+ "$root/scripts/rebuild.sh" --conf "$partial_conf" --live "$(serve "$empty")" \
     --add desktop:main="$scratch/in-arm64" --out "$scratch/partial") > /dev/null
 check "a live Release without amd64 and apple is taken" sh -c \
     "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/partial")' --add kernel:apple='$scratch/in-k1' --out '$scratch/grown' > '$scratch/grown.log'"
@@ -168,7 +187,7 @@ echo x >> "$kernel_deb"
 refuses "a tampered kernel is refused" "does not match its signed index" \
     "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$tampered")" --add desktop:main="$scratch/in-4" --out "$scratch/t1b"
 forged=$scratch/forged
-(make_conf "$forged" && "$root/scripts/rebuild.sh" --conf "$forged" --initial --live "$(serve "$empty")" \
+(make_conf "$forged" && "$root/scripts/rebuild.sh" --conf "$forged" --live "$(serve "$empty")" \
     --add desktop:main="$scratch/in-1" --out "$scratch/forged-site") > /dev/null
 refuses "an index signed by another key is refused" "not signed by the archive key" \
     "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$scratch/forged-site")" --add desktop:main="$scratch/in-4" --out "$scratch/t2"
@@ -217,6 +236,7 @@ else
     check "apt on $host_arch sees no kernel" sh -c "! APT_CONFIG='$lists/apt.conf' apt-cache policy bande-os-apple | grep -q Candidate"
 fi
 check "apt downloads from it" "${apt_env[@]}" apt-get install -y -q --download-only bande-compositor
+check "apt downloads the keyring from it" "${apt_env[@]}" apt-get install -y -q --download-only bande-archive-keyring bande-apt-source
 check "the download is the newest build" test -e "$lists/archives/bande-compositor_0.0.0+git20261030.4.bbbbbb4_${host_arch}.deb"
 
 cp "$conf/archive-key.asc" "$scratch/old-key.asc"

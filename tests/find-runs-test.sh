@@ -6,14 +6,16 @@ conf=$scratch/conf
 make_conf "$conf"
 export GH_TOKEN=test
 
-# A live archive serving desktop 0.1.0 and kernel 7.2.12-1+bande1, which has
-# taken apps run 60.
+# A live archive serving desktop 0.1.0, kernel 7.2.12-1+bande1 and repository
+# packages 1.0, which has taken apps run 60.
 for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop" $p 0.1.0 all; done
 make_deb "$scratch/kernel" linux-image-7.2.12-apple-arm64-16k 7.2.12-1+bande1 arm64
 make_deb "$scratch/kernel" bande-os-apple 7.2.12-1+bande1 arm64
+REPOSITORY_VERSION=1.0 "$root/scripts/build-repository-packages.sh" "$scratch/apt" > /dev/null
 empty=$(mktemp -d -p "$scratch")
-"$root/scripts/rebuild.sh" --conf "$conf" --initial --live "$(serve "$empty")" \
+"$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$empty")" \
     --add desktop:main="$scratch/desktop" --add kernel:apple="$scratch/kernel" --processed apps=60 \
+    --add-each apt:main="$scratch/apt" \
     --out "$scratch/site" > /dev/null
 live=$(serve "$scratch/site")
 
@@ -135,8 +137,13 @@ refuses "a server error still fails" "answered HTTP 500" find_runs "$d/out"
 GITHUB_API_URL=http://127.0.0.1:1
 refuses "a network error still fails" "cannot list" find_runs "$d/out"
 
+d=$(mktemp -d -p "$scratch"); api "$d"
+check "new repository packages are found" sh -c "APT_VERSION=1.1 '$root/scripts/find-runs.sh' '$live' '$conf' | grep -qx 'apt 1.1'"
+check "published repository packages are not" sh -c "APT_VERSION=1.0 '$root/scripts/find-runs.sh' '$live' '$conf' > '$d/out' && test ! -s '$d/out'"
+check "an empty site takes the repository packages" sh -c "APT_VERSION=1.0 '$root/scripts/find-runs.sh' '$(serve "$empty")' '$conf' | grep -qx 'apt 1.0'"
+
 forged=$scratch/forged
-(make_conf "$forged" && "$root/scripts/rebuild.sh" --conf "$forged" --initial --live "$(serve "$empty")" \
+(make_conf "$forged" && "$root/scripts/rebuild.sh" --conf "$forged" --live "$(serve "$empty")" \
     --add desktop:main="$scratch/desktop" --out "$scratch/forged-site") > /dev/null 2>&1
 refuses "a forged archive is refused" "not signed by the archive key" find_runs "$d/out" "$(serve "$scratch/forged-site")"
 

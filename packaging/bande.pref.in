@@ -1,0 +1,7 @@
+Package: *
+Pin: origin @ARCHIVE_HOST@
+Pin-Priority: -1
+
+Package: bande-* xdg-desktop-portal-bande linux-*-apple-*
+Pin: origin @ARCHIVE_HOST@
+Pin-Priority: 500

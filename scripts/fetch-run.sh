@@ -23,10 +23,11 @@ source_repo=$1 run=$2 out=$3
 api=${GITHUB_API_URL:-https://api.github.com}
 wait_limit=${FETCH_RUN_WAIT:-900}
 poll=${FETCH_RUN_POLL:-15}
+# Built by apt itself; no source repository may publish them.
 repository_packages=" bande-archive-keyring bande-apt-source "
 # Names the desktop and the kernel publish, which an app may never take; the
 # desktop's packaging/ directories are added from its main branch.
-reserved=" $repository_packages xdg-desktop-portal-bande bande-desktop bande-os bande-os-apple "
+reserved=" xdg-desktop-portal-bande bande-desktop bande-os bande-os-apple "
 fail() { echo "fetch-run: $*" >&2; exit 1; }
 
 # Per repository: its workflow, the events it publishes from, the package names
@@ -138,10 +139,11 @@ for arch in "${architectures[@]}"; do
             [[ $package != $pattern ]] || allowed=1
         done
         [ "$allowed" = 1 ] || fail "$(basename "$deb") is $package, which $source_repo does not publish"
+        [[ $repository_packages != *" $package "* ]] || fail "$package is built by apt itself; $source_repo may not publish it"
         if [ "$source_repo" = apps ]; then
             [[ $reserved != *" $package "* ]] || fail "$package is the desktop's; an app may not take it"
             [[ $version =~ $version_form ]] || fail "$package carries version $version, not <cargo>+gitDATE.COUNT.SHA"
-        elif [[ $repository_packages != *" $package "* ]] && [ "$version" != "$want_version" ]; then
+        elif [ "$version" != "$want_version" ]; then
             fail "$package carries version $version, the run publishes $want_version"
         fi
         echo "$arch $package $version" >> "$work/names"

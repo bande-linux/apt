@@ -23,8 +23,6 @@ desktop_debs() {
         make_deb "$d/art/$arch" xdg-desktop-portal-bande "$version" $arch
     done
     make_deb "$d/art/all" bande-desktop "$version" all
-    make_deb "$d/art/all" bande-apt-source 1.0 all
-    make_deb "$d/art/all" bande-archive-keyring 1.0 all
 }
 kernel_debs() {
     local d=$1 version=${2:-$kernel_version}
@@ -83,7 +81,8 @@ check "a green desktop tag run feeds main" sh -c "'$root/scripts/fetch-run.sh' d
 check "it brings both architectures" test -e "$d/out/bande-compositor_${desktop_version}_amd64.deb" -a \
     -e "$d/out/bande-compositor_${desktop_version}_arm64.deb"
 check "it brings the architecture-independent packages" test -e "$d/out/bande-desktop_${desktop_version}_all.deb"
-check "repository packages keep their own version" test -e "$d/out/bande-apt-source_1.0_all.deb"
+d=$(case_dir); desktop_debs "$d"; make_deb "$d/art/all" bande-archive-keyring 1.0 all; api "$d" desktop
+refuses "the desktop may not publish the keyring" "bande-archive-keyring is built by apt itself" fetch desktop "$d/out"
 d=$(case_dir); kernel_debs "$d"; api "$d" kernel
 check "a green kernel run feeds apple" sh -c "'$root/scripts/fetch-run.sh' kernel 7 '$d/out' | grep -qx component=apple"
 check "it brings the kernel" test -e "$d/out/linux-image-${kernel_abi}_${kernel_version}_arm64.deb"

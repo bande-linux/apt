@@ -2,6 +2,9 @@
 # Usage: find-runs.sh LIVE_URL [CONF_DIR]
 # Prints "REPO RUN_ID" for each source run newer than what the live, signature-
 # checked archive serves, one per line, nothing when all is published:
+# - apt: "apt VERSION" when $APT_VERSION, the version of the keyring and source
+#   packages this repository builds, is newer than the live
+#   bande-archive-keyring's;
 # - desktop: the green release.yml push of the highest vX.Y.Z tag, whose
 #   version is the tag; the live one is bande-desktop's in main;
 # - kernel: the newest green follow-debian.yml schedule or dispatch run on main
@@ -74,6 +77,15 @@ live_version() {
 }
 
 newer() { [ -z "$2" ] || dpkg --compare-versions "$1" gt "$2"; }
+
+if [ -n "${APT_VERSION:-}" ]; then
+    served=$(live_version main arm64 bande-archive-keyring)
+    if newer "$APT_VERSION" "$served"; then
+        echo "apt $APT_VERSION"
+    else
+        echo "find-runs: the repository packages $APT_VERSION are published" >&2
+    fi
+fi
 
 listing "$api/repos/bande-linux/desktop/actions/workflows/release.yml/runs?event=push&status=success&per_page=100" \
     "$work/desktop.json" '{"workflow_runs": []}' "the desktop's release runs"

@@ -1,0 +1,22 @@
+Package: bande-archive-keyring
+Version: @VERSION@
+Architecture: all
+Multi-Arch: foreign
+Maintainer: Mikael Hug <mikaelhug@gmail.com>
+Section: misc
+Priority: optional
+Description: OpenPGP keys of the Bande APT repository
+ The keys that sign the Bande APT repository at @ARCHIVE_URL@,
+ and an APT pin that allows the repository to provide only Bande's own
+ packages.
+
+Package: bande-apt-source
+Version: @VERSION@
+Architecture: all
+Maintainer: Mikael Hug <mikaelhug@gmail.com>
+Depends: bande-archive-keyring
+Section: misc
+Priority: optional
+Description: Bande APT repository
+ Makes APT follow the rolling suite of the Bande APT repository for Debian
+ testing: the desktop and apps (main) and the Mac mini kernel (apple).
