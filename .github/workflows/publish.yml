@@ -89,6 +89,7 @@ jobs:
       contents: read
     outputs:
       refused: ${{ steps.fetch.outputs.refused }}
+      desktop: ${{ steps.served.outputs.desktop }}
     steps:
       - name: Install git, so the checkout carries the history
         run: |
@@ -160,6 +161,14 @@ jobs:
           gpgconf --kill all
           rm -rf "$GNUPGHOME"
 
+      - name: Name the desktop version the site serves
+        id: served
+        run: |
+          version=$(awk -v RS= '$0 ~ "(^|\n)Package: bande-desktop\n"' public/dists/rolling/main/binary-amd64/Packages |
+            sed -n 's/^Version: //p')
+          echo "bande-desktop ${version:-is not in the archive yet}"
+          echo "desktop=$version" >> "$GITHUB_OUTPUT"
+
       - name: Upload the site (actions/upload-pages-artifact v5)
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9
         with:
@@ -217,7 +226,7 @@ jobs:
         run: scripts/bootstrap-release.sh debs
 
   verify:
-    needs: deploy
+    needs: [build, deploy]
     strategy:
       fail-fast: false
       matrix:
@@ -249,6 +258,40 @@ jobs:
           rm /etc/apt/sources.list.d/bootstrap.sources
           apt-get update -o APT::Update::Error-Mode=any
           apt-cache policy bande-archive-keyring bande-os-apple
+
+      - name: Install the desktop just published and check it is this architecture's build
+        if: needs.build.outputs.desktop != ''
+        env:
+          VERSION: ${{ needs.build.outputs.desktop }}
+        run: |
+          architecture=$(dpkg --print-architecture)
+          for attempt in 1 2 3 4 5; do
+            served=$(apt-cache show --no-all-versions bande-desktop 2>/dev/null | sed -n 's/^Version: //p' || true)
+            [ "$served" != "$VERSION" ] || break
+            if [ "$attempt" = 5 ]; then
+              echo "::error::the site serves bande-desktop ${served:-none}, the publish built $VERSION"
+              exit 1
+            fi
+            echo "Pages serves bande-desktop ${served:-none} yet; trying again in a minute"
+            sleep 60
+            apt-get update -qq -o APT::Update::Error-Mode=any
+          done
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends bande-desktop
+          wrong=$(dpkg-query -W -f '${db:Status-Status} ${Package} ${Architecture} ${Version}\n' 'bande-*' |
+            awk -v a="$architecture" -v v="$VERSION" '$1 == "installed" && $2 != "bande-archive-keyring" &&
+              $2 != "bande-apt-source" && (($3 != a && $3 != "all") || $4 != v)')
+          if [ -n "$wrong" ]; then
+            echo "::error::installed packages that are not $architecture or all at $VERSION: $wrong"
+            exit 1
+          fi
+          [ "$(dpkg-query -W -f '${Architecture} ${Version}' bande-compositor)" = "$architecture $VERSION" ]
+          [ "$(dpkg-query -W -f '${Architecture} ${Version}' xdg-desktop-portal-bande)" = "$architecture $VERSION" ]
+          runtime=$(mktemp -d)
+          status=0
+          XDG_RUNTIME_DIR=$runtime timeout 10 bande-compositor --headless > compositor.out 2>&1 || status=$?
+          cat compositor.out
+          [ "$status" = 124 ]
+          grep -q '^WAYLAND_DISPLAY=wayland-' compositor.out
 
   report:
     needs: [build, deploy]

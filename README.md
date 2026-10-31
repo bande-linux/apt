@@ -126,7 +126,10 @@ No state is kept between runs: the live site is the source of truth.
   `apt-source-VERSION`, which users download in the first install step.
 - **Verify:** after each deploy, a `debian:testing` container on amd64 and on arm64 checks that
   the live `key.asc` is the archive key, installs `bande-archive-keyring` and `bande-apt-source`
-  from the live archive, and updates through the source they install.
+  from the live archive, and updates through the source they install. When the archive
+  carries a desktop, it waits until the site serves the version the build job put in, installs
+  `bande-desktop`, checks that every installed `bande-*` package is built for the machine's
+  architecture (or `all`) at that version, and starts the installed compositor headless.
 
 ## First publish
 
