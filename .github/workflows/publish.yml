@@ -18,6 +18,11 @@ on:
 
 permissions: {}
 
+# Container jobs would default to sh; the steps are bash.
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: pages
   cancel-in-progress: false
