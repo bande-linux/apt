@@ -1,8 +1,9 @@
 #!/bin/bash
 # Usage: fetch-run.sh REPO RUN_ID OUT_DIR
 # Verifies a CI run of unbound-linux/REPO (desktop or kernel): the repository's
-# release workflow, a push, schedule or dispatch on main, finished green, its
-# commit still on main. Then downloads its unbound-debs-ARCH artifacts into
+# release workflow, finished green, its commit on main. A desktop run must be
+# the push of a vX.Y.Z tag that points at the run's commit, and its packages
+# carry X.Y.Z. A kernel run must be a schedule or dispatch on main. Then downloads its unbound-debs-ARCH artifacts into
 # OUT_DIR and checks that they carry only the repository's own package names,
 # every architecture it builds and the same packages for each. Prints
 # component= and appends it to $GITHUB_OUTPUT when set. Needs GH_TOKEN with
@@ -19,19 +20,20 @@ poll=${FETCH_RUN_POLL:-15}
 repository_packages=" unbound-archive-keyring unbound-apt-source "
 fail() { echo "fetch-run: $*" >&2; exit 1; }
 
-# Per repository: its workflow, the package names it may publish, the component
-# they go to, the architectures it must build (all: architecture-independent
-# packages) and the form of its versions (@SHA@: the run's short commit).
+# Per repository: its workflow, the events it publishes from, the package names
+# it may publish, the component they go to, the architectures it must build
+# (all: architecture-independent packages) and the form of its versions.
 case $source_repo in
     desktop)
         workflow=.github/workflows/release.yml
+        events=(push)
         names=('unbound-*' xdg-desktop-portal-unbound)
         component=main
         architectures=(amd64 arm64 all)
-        version_form='^[0-9]+\.[0-9]+\.[0-9]+\+git[0-9]{8}\.[0-9]+\.@SHA@$'
         ;;
     kernel)
         workflow=.github/workflows/follow-debian.yml
+        events=(schedule workflow_dispatch)
         names=('linux-*-apple-*' unbound-os-apple)
         component=apple
         architectures=(arm64)
@@ -53,11 +55,20 @@ call "$api/repos/$repo/actions/runs/$run" > "$work/run.json" || fail "cannot rea
 read -r event path ref sha owner < <(jq -r '[.event, .path, .head_branch, .head_sha, .head_repository.full_name] | @tsv' "$work/run.json")
 [ "$path" = "$workflow" ] || fail "run $run is from $path, not $workflow"
 [ "$owner" = "$repo" ] || fail "run $run built $owner, not $repo"
-case $event in
-    push | schedule | workflow_dispatch) ;;
-    *) fail "run $run was started by $event; the archive takes push, schedule and workflow_dispatch" ;;
-esac
-[ "$ref" = main ] || fail "run $run built $ref; the archive takes main"
+[[ " ${events[*]} " == *" $event "* ]] || fail "run $run was started by $event; $source_repo publishes from ${events[*]}"
+if [ "$source_repo" = desktop ]; then
+    tag=${ref#refs/tags/}
+    [[ $tag =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || fail "run $run built $ref; the desktop publishes vX.Y.Z tags"
+    version_form="^${BASH_REMATCH[1]//./\\.}\$"
+    call "$api/repos/$repo/git/ref/tags/$tag" > "$work/tag.json" || fail "tag $tag does not exist"
+    read -r type object < <(jq -r '[.object.type, .object.sha] | @tsv' "$work/tag.json")
+    if [ "$type" = tag ]; then
+        object=$(call "$api/repos/$repo/git/tags/$object" | jq -r .object.sha)
+    fi
+    [ "$object" = "$sha" ] || fail "tag $tag points at $object, the run built $sha"
+else
+    [ "$ref" = main ] || fail "run $run built $ref; the kernel publishes main"
+fi
 
 waited=0
 while :; do
@@ -77,7 +88,6 @@ case $status in
 esac
 
 call "$api/repos/$repo/actions/runs/$run/artifacts?per_page=100" > "$work/artifacts.json"
-form=${version_form//@SHA@/${sha:0:7}}
 mkdir -p "$out"
 : > "$work/names"
 shopt -s nullglob
@@ -98,7 +108,7 @@ for arch in "${architectures[@]}"; do
             [[ $package != $pattern ]] || allowed=1
         done
         [ "$allowed" = 1 ] || fail "$(basename "$deb") is $package, which $source_repo does not publish"
-        if [[ $repository_packages != *" $package "* ]] && [[ ! $version =~ $form ]]; then
+        if [[ $repository_packages != *" $package "* ]] && [[ ! $version =~ $version_form ]]; then
             fail "$package from $sha carries version $version"
         fi
         echo "$arch $package" >> "$work/names"

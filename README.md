@@ -13,8 +13,8 @@ One suite, `rolling`, for Debian testing:
 
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
-| `main` | amd64, arm64 | green `release.yml` runs on `main` of `unbound-linux/desktop` | `unbound-*`, `xdg-desktop-portal-unbound` |
-| `apple` | arm64 | green `follow-debian.yml` runs on `main` of `unbound-linux/kernel` | `linux-*-apple-*`, `unbound-os-apple` |
+| `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `unbound-linux/desktop`, the tagged commit on `main` | `unbound-*`, `xdg-desktop-portal-unbound` |
+| `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `unbound-linux/kernel` | `linux-*-apple-*`, `unbound-os-apple` |
 
 Each package keeps its newest version only, as in Debian's own suites. Kernel packages carry
 the kernel version in their name, so `apple` keeps the packages of the newest two kernel
@@ -30,16 +30,19 @@ only the newest pending run of a group: when three publishes overlap, the middle
 cancelled, and that repository's build arrives with its next run.
 
 1. [`scripts/fetch-run.sh`](scripts/fetch-run.sh) checks the run:
-   - it must come from the repository's release workflow, be a `push`, `schedule` or
-     `workflow_dispatch` run on `main`, and end in success (it waits for the run to finish);
-   - its commit must still be on `main`.
+   - it must come from the repository's release workflow and end in success (it waits for the
+     run to finish);
+   - a desktop run must be the `push` of a `vX.Y.Z` tag that points at the run's commit; a
+     desktop push to `main` is refused;
+   - a kernel run must be a `schedule` or `workflow_dispatch` run on `main`;
+   - its commit must be on `main`.
 
    It then downloads the `unbound-debs-ARCH` artifacts. The desktop uploads `amd64`, `arm64`
    and `all`; the kernel uploads `arm64`. It refuses:
    - package names outside the repository's list;
    - a package filed under another architecture's artifact;
-   - versions of the wrong form: `X.Y.Z+gitDATE.COUNT.SHA` naming the run's commit for the
-     desktop, `<debian-version>+unboundN` for the kernel;
+   - versions of the wrong form: exactly the tag's `X.Y.Z` for the desktop,
+     `<debian-version>+unboundN` for the kernel;
    - an incomplete architecture: one that lacks a package another architecture carries.
 2. [`scripts/rebuild.sh`](scripts/rebuild.sh) rebuilds the whole archive with reprepro in a fresh
    database:
@@ -72,10 +75,10 @@ No state is kept between runs: the live site is the source of truth.
 The site holds no archive yet, so the first publish must say so; every later one refuses to run
 without a live, signed `InRelease`.
 
-1. Find a green desktop `release.yml` run on `main`:
+1. Find the green desktop `release.yml` run of a `vX.Y.Z` tag push:
 
    ```bash
-   gh run list -R unbound-linux/desktop -w release.yml -b main -s success -L 1
+   gh run list -R unbound-linux/desktop -w release.yml -e push -s success -L 5
    ```
 
 2. Publish it:
