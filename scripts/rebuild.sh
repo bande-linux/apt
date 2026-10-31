@@ -1,12 +1,22 @@
 #!/bin/bash
-# Usage: rebuild.sh --live URL --add COMPONENT=DIR [--add COMPONENT=DIR] --out DIR
-#                   [--conf DIR] [--cache DIR] [--initial]
+# Usage: rebuild.sh --live URL --add|--add-each SOURCE:COMPONENT=DIR [...] --out DIR
+#                   [--processed SOURCE=ID,...] [--conf DIR] [--cache DIR] [--initial]
 # Rebuilds the whole archive from the live, signature-checked site plus the
-# packages in each DIR, which go to its COMPONENT (main or apple), signs it with
-# the keys in conf/signing-keys (secret keys in $GNUPGHOME) and writes the site
-# to --out.
+# packages in each DIR, which come from the repository SOURCE and go to its
+# COMPONENT (main or apple), signs it with the keys in conf/signing-keys (secret
+# keys in $GNUPGHOME) and writes the site to --out.
+# - --add: one build, whose packages on each architecture carry one version; a
+#   version older than the published one, or one published with other
+#   contents, is refused.
+# - --add-each: packages built on their own; one whose version is already
+#   published, or older, is skipped.
 # Each package keeps its newest version only, and apple keeps the packages of
 # its newest two kernel versions only.
+#
+# The site also keeps state/owners, the source each package comes from: a
+# package of another source's name is refused. And state/processed, the runs
+# of each source already taken (--processed adds to it), which find-runs.sh
+# reads.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -20,11 +30,13 @@ keep_kernels=2
 conf=$here/../conf
 site_template=$here/../site
 live='' out='' cache='' initial=0
-batches=()
+batches=() processed=()
 while [ $# -gt 0 ]; do
     case $1 in
         --live) live=${2%/}; shift 2 ;;
-        --add) batches+=("$2"); shift 2 ;;
+        --add) batches+=("one $2"); shift 2 ;;
+        --add-each) batches+=("each $2"); shift 2 ;;
+        --processed) processed+=("$2"); shift 2 ;;
         --out) out=$2; shift 2 ;;
         --conf) conf=$2; shift 2 ;;
         --cache) cache=$2; shift 2 ;;
@@ -33,8 +45,8 @@ while [ $# -gt 0 ]; do
     esac
 done
 fail() { echo "rebuild: $*" >&2; exit 1; }
-if [ -z "$live" ] || [ ${#batches[@]} -eq 0 ] || [ -z "$out" ]; then
-    fail "--live, --add and --out are required"
+if [ -z "$live" ] || [ $((${#batches[@]} + ${#processed[@]})) -eq 0 ] || [ -z "$out" ]; then
+    fail "--live, --add, --add-each or --processed, and --out are required"
 fi
 conf=$(cd "$conf" && pwd)
 [ -s "$conf/archive-key.asc" ] || fail "$conf/archive-key.asc is missing"
@@ -55,8 +67,12 @@ suite=$(field Codename)
 components=$(field Components)
 architectures=$(field Architectures)
 for batch in "${batches[@]}"; do
-    [[ $batch == *=* ]] || fail "--add $batch is not COMPONENT=DIR"
-    [[ " $components " == *" ${batch%%=*} "* ]] || fail "$suite has no component ${batch%%=*}"
+    [[ ${batch#* } =~ ^[a-z]+:[a-z]+=. ]] || fail "${batch#* } is not SOURCE:COMPONENT=DIR"
+    component=${batch#*:} component=${component%%=*}
+    [[ " $components " == *" $component "* ]] || fail "$suite has no component $component"
+done
+for entry in "${processed[@]}"; do
+    [[ $entry =~ ^[a-z]+=[0-9]+(,[0-9]+)*$ ]] || fail "--processed $entry is not SOURCE=ID,..."
 done
 
 get() {
@@ -117,9 +133,13 @@ if get "$live/dists/$suite/InRelease" "$dist/InRelease"; then
             done < "$dist/$c-$arch.files"
         done
     done
+    for state in owners processed; do
+        get "$live/state/$state" "$work/$state" || : > "$work/$state"
+    done
 else
     [ "$initial" = 1 ] || fail "$live/dists/$suite/InRelease does not exist; pass --initial for the first publish"
 fi
+touch "$work/owners" "$work/processed"
 sort -u -o "$work/rows" "$work/rows"
 
 newest() {
@@ -132,8 +152,10 @@ newest() {
 
 shopt -s nullglob
 : > "$work/new"
+cp "$work/owners" "$work/claims"
 for batch in "${batches[@]}"; do
-    component=${batch%%=*} debs=${batch#*=}
+    mode=${batch%% *} batch=${batch#* }
+    source=${batch%%:*} component=${batch#*:} component=${component%%=*} debs=${batch#*=}
     new=("$debs"/*.deb)
     [ ${#new[@]} -gt 0 ] || fail "no packages in $debs"
     : > "$work/batch"
@@ -142,26 +164,34 @@ for batch in "${batches[@]}"; do
         if [[ $repository_packages == *" $package "* ]] && [ "$component" != main ]; then
             fail "$package belongs in main, not $component"
         fi
-        echo "$component $package $arch $version $deb" >> "$work/batch"
+        owner=$(awk -v p="$package" '$1 == p { print $2; exit }' "$work/claims")
+        [ -z "$owner" ] || [ "$owner" = "$source" ] || fail "$package is published from $owner, not $source"
+        echo "$mode $component $package $arch $version $deb" >> "$work/batch"
     done
+    awk -v s="$source" '{ print $3, s }' "$work/batch" | sort -u >> "$work/claims"
 
     # One build: on each architecture, its own and the architecture-independent
     # packages carry one version, the repository packages aside.
-    built=$(awk '$3 != "all" { print $3 }' "$work/batch" | sort -u)
+    built=$(awk '$4 != "all" { print $4 }' "$work/batch" | sort -u)
     for arch in ${built:-all}; do
+        [ "$mode" = one ] || break
         versions=$(awk -v a="$arch" -v skip="$repository_packages" \
-            '($3 == a || $3 == "all") && index(skip, " " $2 " ") == 0 { print $4 }' "$work/batch" | sort -u)
+            '($4 == a || $4 == "all") && index(skip, " " $3 " ") == 0 { print $5 }' "$work/batch" | sort -u)
         [ "$(wc -l <<< "$versions")" -le 1 ] ||
             fail "the $arch packages for $component carry different versions: $(tr '\n' ' ' <<< "$versions")"
     done
     cat "$work/batch" >> "$work/new"
 done
 
-while read -r c package arch version deb; do
+while read -r mode c package arch version deb; do
     sha=$(sha256sum "$deb" | cut -d' ' -f1)
     same=$(awk -v c="$c" -v p="$package" -v a="$arch" -v v="$version" \
         '$1 == c && $2 == p && $3 == a && $4 == v { print $5 }' "$work/rows")
     if [ -n "$same" ]; then
+        if [ "$mode" = each ]; then
+            echo "rebuild: $package $version ($arch) is already in $c; keeping the published one"
+            continue
+        fi
         [ "$(sha256sum "$same" | cut -d' ' -f1)" = "$sha" ] ||
             fail "$package $version ($arch) is already in $c with different contents"
         continue
@@ -169,6 +199,10 @@ while read -r c package arch version deb; do
     top=$(awk -v c="$c" -v p="$package" -v a="$arch" '$1 == c && $2 == p && $3 == a { print $4 }' \
         "$work/rows" | newest)
     if [ -n "$top" ] && dpkg --compare-versions "$version" lt "$top"; then
+        if [ "$mode" = each ]; then
+            echo "rebuild: skipping $package $version ($arch), older than $top in $c"
+            continue
+        fi
         fail "$package $version ($arch) is older than $top in $c"
     fi
     cp "$deb" "$work/pool/$sha.deb"
@@ -211,6 +245,15 @@ cp -r "$work/repo/public/." "$out/"
 cp "$conf/archive-key.asc" "$out/key.asc"
 fingerprint=$(gpg --batch --with-colons --show-keys "$conf/archive-key.asc" | awk -F: '/^fpr/ { print $10; exit }')
 sed "s/@FINGERPRINT@/$fingerprint/g" "$site_template/index.html" > "$out/index.html"
+
+mkdir -p "$out/state"
+reprepro -b "$work/repo" list "$suite" | awk '{ print $2 }' | sort -u | while read -r package; do
+    awk -v p="$package" '$1 == p { print; exit }' "$work/claims"
+done > "$out/state/owners"
+for entry in "${processed[@]}"; do
+    tr , '\n' <<< "${entry#*=}" | sed "s/^/${entry%%=*} /" >> "$work/processed"
+done
+awk '!seen[$0]++' "$work/processed" | tail -n 2000 > "$out/state/processed"
 
 "$here/check-site.sh" "$out" "$work/keyring.gpg"
 echo "== $suite"

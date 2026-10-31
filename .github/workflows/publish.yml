@@ -81,6 +81,7 @@ jobs:
       contents: read
     outputs:
       bootstrap: ${{ steps.packages.outputs.bootstrap }}
+      refused: ${{ steps.fetch.outputs.refused }}
     steps:
       - name: Check out (actions/checkout v7)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -91,17 +92,35 @@ jobs:
           xargs apt-get install -y -qq --no-install-recommends < ci/packages
 
       - name: Verify the runs and fetch their packages
+        id: fetch
         env:
           GH_TOKEN: ${{ github.token }}
           RUNS: ${{ needs.find.outputs.runs }}
         run: |
           set -o pipefail
           : > adds
-          tr , '\n' <<< "$RUNS" | while read -r repo run; do
+          : > refused
+          apps=()
+          while read -r repo run; do
+            if [ "$repo" = apps ]; then
+              apps+=("$run")
+              if ! env -u GITHUB_OUTPUT scripts/fetch-run.sh apps "$run" debs-apps < /dev/null; then
+                echo "::error::apps run $run is refused; it is marked as taken and left out"
+                echo "apps $run" >> refused
+              fi
+              continue
+            fi
             component=$(env -u GITHUB_OUTPUT scripts/fetch-run.sh "$repo" "$run" "debs-$repo" < /dev/null |
               sed -n 's/^component=//p')
-            printf -- '--add\n%s=debs-%s\n' "$component" "$repo" >> adds
-          done
+            printf -- '--add\n%s:%s=debs-%s\n' "$repo" "$component" "$repo" >> adds
+          done < <(tr , '\n' <<< "$RUNS")
+          if compgen -G 'debs-apps/*.deb' > /dev/null; then
+            printf -- '--add-each\napps:main=debs-apps\n' >> adds
+          fi
+          if [ ${#apps[@]} -gt 0 ]; then
+            printf -- '--processed\napps=%s\n' "$(IFS=,; echo "${apps[*]}")" >> adds
+          fi
+          echo "refused=$(paste -sd, refused)" >> "$GITHUB_OUTPUT"
 
       - name: Restore the pool cache (actions/cache v6)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
@@ -190,3 +209,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: scripts/bootstrap-release.sh debs
+
+  report:
+    needs: [build, deploy]
+    if: needs.build.outputs.refused != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refused runs
+        env:
+          REFUSED: ${{ needs.build.outputs.refused }}
+        run: |
+          echo "::error::published without these refused runs: $REFUSED; see the build job's log"
+          exit 1

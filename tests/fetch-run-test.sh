@@ -32,14 +32,25 @@ kernel_debs() {
     make_deb "$d/art/arm64" linux-image-apple-arm64-16k "$version" arm64
     make_deb "$d/art/arm64" bande-os-apple "$version" arm64
 }
+apps_version=0.1.0+git20261101.3.788731f
+apps_debs() {
+    local d=$1 app=$2 version=${3:-$apps_version} arch
+    for arch in amd64 arm64; do make_deb "$d/art/$arch" "bande-$app" "$version" $arch; done
+}
 api() {
     local d=$1 repo=bande-linux/$2 base id=20 arch workflow=${workflow:-} event=${event:-} ref=${ref:-}
     base=$d/repos/$repo
     case $2 in
         desktop) : "${workflow:=release.yml}" "${event:=push}" "${ref:=v0.1.0}" ;;
+        apps) : "${workflow:=build.yml}" "${event:=push}" "${ref:=main}" ;;
         *) : "${workflow:=follow-debian.yml}" "${event:=schedule}" "${ref:=main}" ;;
     esac
-    mkdir -p "$base/actions/runs/7" "$base/actions/artifacts" "$base/compare" "$base/git/ref/tags" "$base/git/tags"
+    mkdir -p "$base/actions/runs/7" "$base/actions/artifacts" "$base/compare" "$base/git/ref/tags" "$base/git/tags" \
+        "$base/contents" "$d/repos/bande-linux/desktop/contents"
+    tr " " "\n" <<< "${app_dirs:-weather clock}" | jq -R '{name: ., type: "dir"}' | jq -s '. + [{name: "README.md", type: "file"}]' \
+        > "$base/contents/apps"
+    printf '%s\n' bande-desktop bande-apt-source bande-greeter | jq -R '{name: ., type: "dir"}' | jq -s . \
+        > "$d/repos/bande-linux/desktop/contents/packaging"
     jq -n --arg s "${tagged:-$sha}" '{object: {type: "commit", sha: $s}}' > "$base/git/ref/tags/v0.1.0"
     jq -n '{object: {type: "tag", sha: "abcd"}}' > "$base/git/ref/tags/v0.1.1"
     jq -n --arg s "$sha" '{object: {type: "commit", sha: $s}}' > "$base/git/tags/abcd"
@@ -136,5 +147,48 @@ refuses "an incomplete architecture is refused" "incomplete architecture" fetch 
 d=$(case_dir); desktop_debs "$d"; mv "$d/art/amd64/xdg-desktop-portal-bande_"* "$d/art/arm64/"; api "$d" desktop
 refuses "a package in another architecture's artifact is refused" "bande-debs-arm64 holds xdg-desktop-portal-bande for amd64" \
     fetch desktop "$d/out"
+
+d=$(case_dir); apps_debs "$d" weather; api "$d" apps
+check "an apps run with one app feeds main" sh -c "'$root/scripts/fetch-run.sh' apps 7 '$d/out' | grep -qx component=main"
+check "it brings the app for amd64 and arm64" test -e "$d/out/bande-weather_${apps_version}_amd64.deb" -a \
+    -e "$d/out/bande-weather_${apps_version}_arm64.deb"
+d=$(case_dir); apps_debs "$d" weather; apps_debs "$d" clock 0.2.0+git20261101.5.788731f; event=workflow_dispatch api "$d" apps
+check "a dispatched run with two apps of their own versions is taken" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" desktop; app_dirs=desktop api "$d" apps
+refuses "an app named like the desktop is refused" "bande-desktop is the desktop's" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" greeter; app_dirs=greeter api "$d" apps
+refuses "an app named like a desktop package directory is refused" "bande-greeter is the desktop's" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" portal-bande; make_deb "$d/art/amd64" xdg-desktop-portal-bande "$apps_version" amd64; app_dirs=portal-bande api "$d" apps
+refuses "a desktop name outside bande-* is refused" "xdg-desktop-portal-bande, which apps does not publish" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" radio; api "$d" apps
+refuses "a package without an apps/ directory is refused" "bande-radio, which apps does not publish" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" weather; apps_debs "$d" clock; rm "$d/art/amd64/bande-clock_"*; api "$d" apps
+refuses "an app missing one architecture is refused" "incomplete architecture" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" weather; rm -r "$d/art/amd64"; api "$d" apps
+refuses "an apps run without amd64 is refused" "no single bande-debs-amd64" fetch apps "$d/out"
+d=$(case_dir); make_deb "$d/art/amd64" bande-weather "$apps_version" amd64
+make_deb "$d/art/arm64" bande-weather 0.1.0+git20261101.4.aaaaaaa arm64; api "$d" apps
+refuses "an app of two versions is refused" "different versions per architecture: bande-weather" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" weather 0.1.0; api "$d" apps
+refuses "an app version without +git is refused" "not <cargo>+gitDATE.COUNT.SHA" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" template; ref=ci-test app_dirs=template api "$d" apps
+refuses "a branch run of apps is refused" "the apps publishes main" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" weather; event=schedule api "$d" apps
+refuses "a scheduled apps run is refused" "started by schedule" fetch apps "$d/out"
+
+merged=$(case_dir)/out
+d=$(case_dir); apps_debs "$d" weather 0.1.0+git20261101.4.aaaaaaa; apps_debs "$d" clock; api "$d" apps
+check "a newer run merges" fetch apps "$merged"
+d=$(case_dir); apps_debs "$d" weather; api "$d" apps
+check "an older run merges" fetch apps "$merged"
+check "the newer weather is kept" test -e "$merged/bande-weather_0.1.0+git20261101.4.aaaaaaa_arm64.deb"
+check "the older weather is not added" test ! -e "$merged/bande-weather_${apps_version}_arm64.deb"
+check "clock from the first run stays" test -e "$merged/bande-clock_${apps_version}_amd64.deb"
+d=$(case_dir); apps_debs "$d" weather 0.1.0+git20261102.5.bbbbbbb; api "$d" apps
+check "a still newer run merges" fetch apps "$merged"
+check "it replaces the weather" sh -c "ls '$merged' | grep bande-weather | tr '\n' ' ' | grep -qx 'bande-weather_0.1.0+git20261102.5.bbbbbbb_amd64.deb bande-weather_0.1.0+git20261102.5.bbbbbbb_arm64.deb '"
+d=$(case_dir); apps_debs "$d" weather 0.1.0+git20261103.6.ccccccc; apps_debs "$d" radio; api "$d" apps
+refuses "a refused run adds nothing" "apps does not publish" fetch apps "$merged"
+check "nothing of it reached the merge" sh -c "! ls '$merged' | grep -q 'ccccccc\|radio'"
 
 finish

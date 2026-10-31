@@ -14,6 +14,7 @@ One suite, `rolling`, for Debian testing:
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
 | `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande` |
+| `main` | amd64, arm64 | green `build.yml` push or dispatch runs on `main` of `bande-linux/apps`, one package per app | `bande-<dir>` for each `apps/<dir>` |
 | `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` that built a kernel | `linux-*-apple-*`, `bande-os-apple` |
 
 Each package keeps its newest version only, as in Debian's own suites. Kernel packages carry
@@ -21,10 +22,14 @@ the kernel version in their name, so `apple` keeps the packages of the newest tw
 versions and drops older ones; kernel debs are large and the site must stay under the Pages
 limit. The repository packages (`bande-archive-keyring`, `bande-apt-source`) live in `main`.
 
+Each package name belongs to one source repository. The site keeps the owners in
+`state/owners`, and a publish refuses a name another source already publishes. An app can never
+take a name the desktop publishes.
+
 ## How a publish works
 
 [`publish.yml`](.github/workflows/publish.yml) runs every 30 minutes. The source repositories
-need no publish step and no token for apt: they only upload their artifacts, and apt reads both
+need no publish step and no token for apt: they only upload their artifacts, and apt reads the
 public repositories with its own `github.token`. Its only secret is `APT_SIGNING_KEY`.
 
 0. [`scripts/find-runs.sh`](scripts/find-runs.sh) looks for runs newer than the live archive,
@@ -33,10 +38,14 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
      `bande-desktop` in `main`;
    - kernel: the newest green `follow-debian.yml` run on `main` that uploaded a
      `bande-version-VERSION` artifact (runs that found nothing new upload none), against the
-     version of `bande-os-apple` in `apple`.
+     version of `bande-os-apple` in `apple`;
+   - apps: every green `build.yml` push or dispatch run on `main` from the last 14 days that
+     uploaded packages and is not listed in the live `state/processed`. A run carries only the
+     apps it built, and a dispatch may rebuild versions that are already published, so every
+     such run is taken; the publish records it in `state/processed`.
 
    With nothing new the workflow stops there: no rebuild, no deploy, and no use of the
-   `apt-publish` environment. A desktop and a kernel release found together go out in one
+   `apt-publish` environment. Releases of several repositories found together go out in one
    publish.
 
 A dispatch with `repo` and `run_id` publishes that run instead of searching. Publishes share
@@ -50,25 +59,39 @@ same releases.
    - a desktop run must be the `push` of a `vX.Y.Z` tag that points at the run's commit; a
      desktop push to `main` is refused;
    - a kernel run must be a `schedule` or `workflow_dispatch` run on `main`;
+   - an apps run must be a `push` or `workflow_dispatch` run on `main`; branch runs, such as
+     the `ci-test` run of `bande-template`, are never published;
    - its commit must be on `main`.
 
    It then downloads the `bande-debs-ARCH` artifacts. The desktop uploads `amd64`, `arm64`
-   and `all`; the kernel uploads `arm64`. It refuses:
-   - package names outside the repository's list;
+   and `all`, the kernel `arm64`, and apps `amd64` and `arm64`. It refuses:
+   - package names outside the repository's list; for apps, `bande-<dir>` for a directory under
+     `apps/` at the run's commit, and never a name of the desktop's (its `packaging/`
+     directories, `bande-desktop`, `bande-os`, `xdg-desktop-portal-bande`, the repository
+     packages);
    - a package filed under another architecture's artifact;
    - versions other than the run's: exactly the tag's `X.Y.Z` for the desktop, and for the
      kernel the version its one `bande-version-VERSION` artifact names, of the form
-     `<debian-version>+bandeN`;
+     `<debian-version>+bandeN`; each app carries its own `<cargo>+gitDATE.COUNT.SHA`, the
+     same on both architectures;
    - an incomplete architecture: one that lacks a package another architecture carries.
+
+   Several apps runs merge into one directory, keeping each app's newest version. A refused
+   apps run is recorded as taken and left out, so it cannot hold up the other releases; the
+   publish then ends red, naming it.
 2. [`scripts/rebuild.sh`](scripts/rebuild.sh) rebuilds the whole archive with reprepro in a fresh
    database:
    - its input is the live site, whose `InRelease` signatures, `Packages` and pool checksums are
-     all verified, plus the new packages of each run (`--add COMPONENT=DIR`, once per run);
+     all verified, plus the new packages: `--add SOURCE:COMPONENT=DIR` for a desktop or kernel
+     build, `--add-each apps:main=DIR` for apps;
    - a component or architecture that the live `Release` does not list yet starts empty;
-   - on each architecture, the new packages (with the architecture-independent ones) must
-     carry one version, the repository packages aside;
-   - it refuses a version older than the live one and changed contents under a published
+   - for a desktop or kernel build, the new packages on each architecture (with the
+     architecture-independent ones) must carry one version, the repository packages aside, and
+     it refuses a version older than the live one and changed contents under a published
      version;
+   - for apps, each package stands alone: one whose version is already published, or older, is
+     skipped and the published one kept;
+   - it refuses a name that `state/owners` gives to another source;
    - it signs with every key in [`conf/signing-keys`](conf/signing-keys).
 3. [`scripts/check-site.sh`](scripts/check-site.sh) checks the result before deploying:
    signatures, checksums, no unlisted pool files, no file over 95 MB, and the site under 800 MB

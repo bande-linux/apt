@@ -1,14 +1,19 @@
 #!/bin/bash
 # Usage: fetch-run.sh REPO RUN_ID OUT_DIR
-# Verifies a CI run of bande-linux/REPO (desktop or kernel): the repository's
-# release workflow, finished green, its commit on main. A desktop run must be
-# the push of a vX.Y.Z tag that points at the run's commit, and its packages
-# carry X.Y.Z. A kernel run must be a schedule or dispatch on main, and name its
-# version with one bande-version-VERSION artifact, which its packages carry.
+# Verifies a CI run of bande-linux/REPO (desktop, kernel or apps): the
+# repository's release workflow, finished green, its commit on main.
+# - desktop: the push of a vX.Y.Z tag that points at the run's commit; its
+#   packages carry X.Y.Z.
+# - kernel: a schedule or dispatch on main, naming its version with one
+#   bande-version-VERSION artifact, which its packages carry.
+# - apps: a push or dispatch on main; each package is bande-<dir> for an
+#   apps/<dir> at the run's commit, never a name of the desktop's, and carries
+#   its own <cargo>+gitDATE.COUNT.SHA, the same on both architectures.
 # Then downloads its bande-debs-ARCH artifacts into OUT_DIR and checks that they
 # carry only the repository's own package names, every architecture it builds
-# and the same packages for each. Prints component= and appends it to
-# $GITHUB_OUTPUT when set. Needs GH_TOKEN; both repositories are public.
+# and the same packages for each. A package OUT_DIR already holds at a newer
+# version is left, so several apps runs merge. Prints component= and appends it
+# to $GITHUB_OUTPUT when set. Needs GH_TOKEN; the repositories are public.
 #
 # A run given by hand may still be going; this waits up to $FETCH_RUN_WAIT
 # seconds (default 900) for it to end.
@@ -19,6 +24,9 @@ api=${GITHUB_API_URL:-https://api.github.com}
 wait_limit=${FETCH_RUN_WAIT:-900}
 poll=${FETCH_RUN_POLL:-15}
 repository_packages=" bande-archive-keyring bande-apt-source "
+# Names the desktop and the kernel publish, which an app may never take; the
+# desktop's packaging/ directories are added from its main branch.
+reserved=" $repository_packages xdg-desktop-portal-bande bande-desktop bande-os bande-os-apple "
 fail() { echo "fetch-run: $*" >&2; exit 1; }
 
 # Per repository: its workflow, the events it publishes from, the package names
@@ -39,7 +47,15 @@ case $source_repo in
         component=apple
         architectures=(arm64)
         ;;
-    *) fail "unknown repository $source_repo; the archive takes desktop and kernel" ;;
+    apps)
+        workflow=.github/workflows/build.yml
+        events=(push workflow_dispatch)
+        names=()
+        component=main
+        architectures=(amd64 arm64)
+        version_form='^[0-9][^+ ]*\+git[0-9]{8}\.[0-9]+\.[0-9a-f]{7}$'
+        ;;
+    *) fail "unknown repository $source_repo; the archive takes desktop, kernel and apps" ;;
 esac
 repo=bande-linux/$source_repo
 
@@ -67,7 +83,7 @@ if [ "$source_repo" = desktop ]; then
     fi
     [ "$object" = "$sha" ] || fail "tag $tag points at $object, the run built $sha"
 else
-    [ "$ref" = main ] || fail "run $run built $ref; the kernel publishes main"
+    [ "$ref" = main ] || fail "run $run built $ref; the $source_repo publishes main"
 fi
 
 waited=0
@@ -95,7 +111,14 @@ if [ "$source_repo" = kernel ]; then
     [[ ${named[0]} =~ ^[0-9][A-Za-z0-9.~-]*\+bande[0-9]+$ ]] || fail "run $run names version ${named[0]}, not <debian-version>+bandeN"
     want_version=${named[0]}
 fi
-mkdir -p "$out"
+if [ "$source_repo" = apps ]; then
+    call "$api/repos/$repo/contents/apps?ref=$sha" > "$work/apps.json" || fail "cannot list apps/ at $sha"
+    mapfile -t names < <(jq -r '.[] | select(.type == "dir") | "bande-" + .name' "$work/apps.json")
+    call "$api/repos/bande-linux/desktop/contents/packaging?ref=main" > "$work/packaging.json" ||
+        fail "cannot list the desktop's packaging/"
+    reserved+="$(jq -r '.[] | select(.type == "dir") | .name' "$work/packaging.json" | tr '\n' ' ')"
+fi
+mkdir -p "$out" "$work/stage"
 : > "$work/names"
 shopt -s nullglob
 for arch in "${architectures[@]}"; do
@@ -115,11 +138,14 @@ for arch in "${architectures[@]}"; do
             [[ $package != $pattern ]] || allowed=1
         done
         [ "$allowed" = 1 ] || fail "$(basename "$deb") is $package, which $source_repo does not publish"
-        if [[ $repository_packages != *" $package "* ]] && [ "$version" != "$want_version" ]; then
+        if [ "$source_repo" = apps ]; then
+            [[ $reserved != *" $package "* ]] || fail "$package is the desktop's; an app may not take it"
+            [[ $version =~ $version_form ]] || fail "$package carries version $version, not <cargo>+gitDATE.COUNT.SHA"
+        elif [[ $repository_packages != *" $package "* ]] && [ "$version" != "$want_version" ]; then
             fail "$package carries version $version, the run publishes $want_version"
         fi
-        echo "$arch $package" >> "$work/names"
-        mv "$deb" "$out/"
+        echo "$arch $package $version" >> "$work/names"
+        mv "$deb" "$work/stage/"
     done
 done
 
@@ -133,6 +159,24 @@ for arch in "${architectures[@]}"; do
         fail "incomplete architecture: $first carries [${expected% }], $arch carries [${got% }]"
     fi
     first=${first:-$arch} expected=$got
+done
+split=$(awk '$1 != "all" { print $2, $3 }' "$work/names" | sort -u | awk '{ print $1 }' | uniq -d)
+[ -z "$split" ] || fail "packages built at different versions per architecture: $(tr '\n' ' ' <<< "$split")"
+
+describe() { dpkg-deb --show --showformat="\${Package} \${Architecture} \${Version}\n" "$1"; }
+for deb in "$work/stage"/*.deb; do
+    read -r package arch version < <(describe "$deb")
+    keep=1
+    for held in "$out"/*.deb; do
+        read -r held_package held_arch held_version < <(describe "$held")
+        [ "$held_package $held_arch" = "$package $arch" ] || continue
+        if dpkg --compare-versions "$version" gt "$held_version"; then
+            rm "$held"
+        else
+            keep=0
+        fi
+    done
+    if [ "$keep" = 1 ]; then mv "$deb" "$out/"; fi
 done
 
 echo "component=$component"

@@ -44,8 +44,9 @@ sudo apt install bande-desktop</code></pre>
 <code>sudo apt upgrade</code>.</p>
 
 <h2>Components</h2>
-<p><code>main</code> (amd64, arm64) holds the desktop, <code>bande-os</code> and the repository
-packages. <code>apple</code> (arm64) holds the Mac mini M2 kernel, built from Debian's kernel
+<p><code>main</code> (amd64, arm64) holds the desktop, <code>bande-os</code>, the repository
+packages and the optional apps, each installed on its own with
+<code>sudo apt install bande-&lt;name&gt;</code>. <code>apple</code> (arm64) holds the Mac mini M2 kernel, built from Debian's kernel
 with the Apple patches, and <code>bande-os-apple</code>; it carries the newest two kernel
 versions.</p>
 

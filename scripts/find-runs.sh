@@ -6,7 +6,11 @@
 #   version is the tag; the live one is bande-desktop's in main;
 # - kernel: the newest green follow-debian.yml schedule or dispatch run on main
 #   with a bande-version-VERSION artifact; the live one is bande-os-apple's in
-#   apple.
+#   apple;
+# - apps: every green build.yml push or dispatch run on main of the last
+#   $FIND_RUNS_DAYS days (default 14) that uploaded packages and is not in the
+#   live state/processed. Each run carries only the apps it built, so all of
+#   them are taken; rebuild.sh skips app versions already published.
 # fetch-run.sh checks each printed run in full. Needs GH_TOKEN; both
 # repositories are public.
 set -euo pipefail
@@ -14,6 +18,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 live=${1%/} conf=${2:-$here/../conf}
 api=${GITHUB_API_URL:-https://api.github.com}
+days=${FIND_RUNS_DAYS:-14}
 fail() { echo "find-runs: $*" >&2; exit 1; }
 
 call() {
@@ -90,3 +95,27 @@ if [ -n "$kernel_run" ]; then
         echo "find-runs: kernel $kernel_version (run $kernel_run) is published" >&2
     fi
 fi
+
+: > "$work/processed"
+if [ -e "$work/Release" ]; then
+    code=$(curl -sS --retry 3 -o "$work/processed" -w '%{http_code}' "$live/state/processed") ||
+        fail "cannot fetch $live/state/processed"
+    case $code in
+        200) ;;
+        404) : > "$work/processed" ;;
+        *) fail "$live/state/processed answered HTTP $code" ;;
+    esac
+fi
+since=$(date -u -d "$days days ago" +%Y-%m-%dT%H:%M:%SZ)
+call "$api/repos/bande-linux/apps/actions/workflows/build.yml/runs?branch=main&status=success&created=%3E%3D$since&per_page=100" \
+    > "$work/apps.json" || fail "cannot list the apps' build runs"
+while read -r id; do
+    if grep -qx "apps $id" "$work/processed"; then continue; fi
+    call "$api/repos/bande-linux/apps/actions/runs/$id/artifacts?per_page=100" > "$work/artifacts.json" ||
+        fail "cannot list the artifacts of apps run $id"
+    if jq -e '[.artifacts[] | select((.expired | not) and (.name == "bande-debs-arm64" or .name == "bande-debs-amd64"))]
+        | length == 2' "$work/artifacts.json" > /dev/null; then
+        echo "apps $id"
+    fi
+done < <(jq -r --arg since "$since" '.workflow_runs[] | select(.head_branch == "main" and .conclusion == "success"
+    and (.event == "push" or .event == "workflow_dispatch") and .created_at >= $since) | .id' "$work/apps.json")
