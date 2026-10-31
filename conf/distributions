@@ -1,9 +1,9 @@
-Origin: Unbound
-Label: Unbound
+Origin: Bande
+Label: Bande
 Codename: rolling
 Suite: rolling
 Architectures: amd64 arm64
 Components: main apple
-Description: Unbound for Debian testing: the desktop (main) and the Mac mini kernel (apple), every green build
+Description: Bande for Debian testing: the desktop (main) and the Mac mini kernel (apple), every green build
 DebIndices: Packages Release . .gz .xz
 SignWith: @SIGNING_KEYS@

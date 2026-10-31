@@ -10,7 +10,7 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 # The keyring and source packages live in main and carry their own version.
-repository_packages=" unbound-archive-keyring unbound-apt-source "
+repository_packages=" bande-archive-keyring bande-apt-source "
 # Kernel packages carry the kernel version in their name, so each kernel stays
 # until it is dropped; keep_kernels bounds how many fit within the Pages limit.
 kernel_packages='linux-*-apple-*'

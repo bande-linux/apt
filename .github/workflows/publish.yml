@@ -49,7 +49,7 @@ jobs:
         with:
           client-id: ${{ vars.DESKTOP_READER_CLIENT_ID }}
           private-key: ${{ secrets.DESKTOP_READER_KEY }}
-          owner: unbound-linux
+          owner: bande-linux
           repositories: ${{ inputs.repo }}
           permission-actions: read
           permission-contents: read
@@ -80,7 +80,7 @@ jobs:
           printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --quiet --import
           initial=()
           [ "$INITIAL" != true ] || initial=(--initial)
-          scripts/rebuild.sh --live https://unbound-linux.github.io/apt --component "$COMPONENT" \
+          scripts/rebuild.sh --live https://bande-linux.github.io/apt --component "$COMPONENT" \
             --debs debs --out public --cache pool-cache "${initial[@]}"
           gpgconf --kill all
           rm -rf "$GNUPGHOME"
@@ -93,7 +93,7 @@ jobs:
       - name: Find the repository packages
         id: packages
         run: |
-          if ls debs/unbound-apt-source_*_all.deb > /dev/null 2>&1; then
+          if ls debs/bande-apt-source_*_all.deb > /dev/null 2>&1; then
             echo bootstrap=true >> "$GITHUB_OUTPUT"
           fi
 
@@ -103,8 +103,8 @@ jobs:
         with:
           name: repository-packages
           path: |
-            debs/unbound-archive-keyring_*_all.deb
-            debs/unbound-apt-source_*_all.deb
+            debs/bande-archive-keyring_*_all.deb
+            debs/bande-apt-source_*_all.deb
           if-no-files-found: error
 
   deploy:

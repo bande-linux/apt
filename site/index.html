@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Unbound APT repository</title>
+<title>Bande APT repository</title>
 <style>
 :root { --bg: #fbfbfa; --fg: #1d1d1f; --muted: #5f6368; --code: #f0f0ee; --line: #dcdcd8; }
 @media (prefers-color-scheme: dark) { :root { --bg: #161617; --fg: #ececec; --muted: #a1a1a6; --code: #232325; --line: #333336; } }
@@ -20,40 +20,40 @@ p code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
 </head>
 <body>
 <main>
-<h1>Unbound</h1>
-<p class="lead">APT repository for the Unbound desktop on Debian testing, amd64 and arm64. One rolling
+<h1>Bande</h1>
+<p class="lead">APT repository for the Bande desktop on Debian testing, amd64 and arm64. One rolling
 suite: every tagged desktop release, and the Mac mini kernel as Debian testing moves.</p>
 
 <h2>Install</h2>
 <p>On Debian testing (packages here are built against testing and do not install on Debian 13).</p>
 <p>1. Download the keyring and the source package from the latest GitHub release, and install both:</p>
 <pre><code>cd /tmp
-wget https://github.com/unbound-linux/apt/releases/latest/download/unbound-archive-keyring.deb \
-     https://github.com/unbound-linux/apt/releases/latest/download/unbound-apt-source.deb
-sudo apt install ./unbound-archive-keyring.deb ./unbound-apt-source.deb</code></pre>
-<p>This adds <code>/etc/apt/sources.list.d/unbound.sources</code>:</p>
+wget https://github.com/bande-linux/apt/releases/latest/download/bande-archive-keyring.deb \
+     https://github.com/bande-linux/apt/releases/latest/download/bande-apt-source.deb
+sudo apt install ./bande-archive-keyring.deb ./bande-apt-source.deb</code></pre>
+<p>This adds <code>/etc/apt/sources.list.d/bande.sources</code>:</p>
 <pre><code>Types: deb
-URIs: https://unbound-linux.github.io/apt
+URIs: https://bande-linux.github.io/apt
 Suites: rolling
 Components: main apple
-Signed-By: /usr/share/keyrings/unbound-archive-keyring.pgp</code></pre>
+Signed-By: /usr/share/keyrings/bande-archive-keyring.pgp</code></pre>
 <p>2. Install the desktop:</p>
 <pre><code>sudo apt update
-sudo apt install unbound-desktop</code></pre>
-<p>Log out and choose <strong>Unbound</strong> at the login screen. Updates arrive with
+sudo apt install bande-desktop</code></pre>
+<p>Log out and choose <strong>Bande</strong> at the login screen. Updates arrive with
 <code>sudo apt upgrade</code>.</p>
 
 <h2>Components</h2>
-<p><code>main</code> (amd64, arm64) holds the desktop, <code>unbound-os</code> and the repository
+<p><code>main</code> (amd64, arm64) holds the desktop, <code>bande-os</code> and the repository
 packages. <code>apple</code> (arm64) holds the Mac mini M2 kernel, built from Debian's kernel
-with the Apple patches, and <code>unbound-os-apple</code>; it carries the newest two kernel
+with the Apple patches, and <code>bande-os-apple</code>; it carries the newest two kernel
 versions.</p>
 
 <h2>Remove</h2>
-<pre><code>sudo apt purge unbound-apt-source unbound-archive-keyring</code></pre>
+<pre><code>sudo apt purge bande-apt-source bande-archive-keyring</code></pre>
 
 <h2>Signing key</h2>
-<p>Packages and indices are signed with the Unbound archive key
+<p>Packages and indices are signed with the Bande archive key
 (<a href="key.asc">key.asc</a>), fingerprint:</p>
 <pre><code class="fpr">@FINGERPRINT@</code></pre>
 <p>If a machine was offline through a key change and <code>apt update</code> reports a signature

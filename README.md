@@ -1,7 +1,7 @@
-# Unbound APT repository
+# Bande APT repository
 
-The APT repository for the Unbound desktop, served by GitHub Pages at
-<https://unbound-linux.github.io/apt>. This repository holds only the tooling that builds and
+The APT repository for the Bande desktop, served by GitHub Pages at
+<https://bande-linux.github.io/apt>. This repository holds only the tooling that builds and
 signs the published site. The site itself is deployed as a Pages artifact and is not stored in
 git.
 
@@ -13,13 +13,13 @@ One suite, `rolling`, for Debian testing:
 
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
-| `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `unbound-linux/desktop`, the tagged commit on `main` | `unbound-*`, `xdg-desktop-portal-unbound` |
-| `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `unbound-linux/kernel` | `linux-*-apple-*`, `unbound-os-apple` |
+| `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande` |
+| `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` | `linux-*-apple-*`, `bande-os-apple` |
 
 Each package keeps its newest version only, as in Debian's own suites. Kernel packages carry
 the kernel version in their name, so `apple` keeps the packages of the newest two kernel
 versions and drops older ones; kernel debs are large and the site must stay under the Pages
-limit. The repository packages (`unbound-archive-keyring`, `unbound-apt-source`) live in `main`.
+limit. The repository packages (`bande-archive-keyring`, `bande-apt-source`) live in `main`.
 
 ## How a publish works
 
@@ -37,12 +37,12 @@ cancelled, and that repository's build arrives with its next run.
    - a kernel run must be a `schedule` or `workflow_dispatch` run on `main`;
    - its commit must be on `main`.
 
-   It then downloads the `unbound-debs-ARCH` artifacts. The desktop uploads `amd64`, `arm64`
+   It then downloads the `bande-debs-ARCH` artifacts. The desktop uploads `amd64`, `arm64`
    and `all`; the kernel uploads `arm64`. It refuses:
    - package names outside the repository's list;
    - a package filed under another architecture's artifact;
    - versions of the wrong form: exactly the tag's `X.Y.Z` for the desktop,
-     `<debian-version>+unboundN` for the kernel;
+     `<debian-version>+bandeN` for the kernel;
    - an incomplete architecture: one that lacks a package another architecture carries.
 2. [`scripts/rebuild.sh`](scripts/rebuild.sh) rebuilds the whole archive with reprepro in a fresh
    database:
@@ -78,17 +78,17 @@ without a live, signed `InRelease`.
 1. Find the green desktop `release.yml` run of a `vX.Y.Z` tag push:
 
    ```bash
-   gh run list -R unbound-linux/desktop -w release.yml -e push -s success -L 5
+   gh run list -R bande-linux/desktop -w release.yml -e push -s success -L 5
    ```
 
 2. Publish it:
 
    ```bash
-   gh workflow run publish.yml -R unbound-linux/apt -f repo=desktop -f run_id=RUN_ID -f initial=true
+   gh workflow run publish.yml -R bande-linux/apt -f repo=desktop -f run_id=RUN_ID -f initial=true
    ```
 
-3. Check <https://unbound-linux.github.io/apt/dists/rolling/InRelease> and the
-   `apt-source-VERSION` release, then `apt install unbound-desktop` in a fresh Debian testing
+3. Check <https://bande-linux.github.io/apt/dists/rolling/InRelease> and the
+   `apt-source-VERSION` release, then `apt install bande-desktop` in a fresh Debian testing
    on amd64 and arm64.
 
 The kernel's first publish needs no `initial`: it adds `apple` to the live archive.

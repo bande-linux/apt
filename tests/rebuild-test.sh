@@ -16,14 +16,14 @@ has() { [[ " $(listed "$1" "$2" "$3")" == *" $4 "* ]]; }
 lacks() { ! has "$@"; }
 both() { has "$1" "$2" amd64 "$3" && has "$1" "$2" arm64 "$3"; }
 desktop() {
-    make_deb "$scratch/in-$1" unbound-compositor "$2" amd64
-    make_deb "$scratch/in-$1" unbound-compositor "$2" arm64
-    make_deb "$scratch/in-$1" unbound-desktop "$2" all
+    make_deb "$scratch/in-$1" bande-compositor "$2" amd64
+    make_deb "$scratch/in-$1" bande-compositor "$2" arm64
+    make_deb "$scratch/in-$1" bande-desktop "$2" all
 }
 kernel() {
     make_deb "$scratch/in-$1" "linux-image-$2-apple-arm64-16k" "$3" arm64
     make_deb "$scratch/in-$1" linux-image-apple-arm64-16k "$3" arm64
-    make_deb "$scratch/in-$1" unbound-os-apple "$3" arm64
+    make_deb "$scratch/in-$1" bande-os-apple "$3" arm64
 }
 d1=0.0.0+git20261029.1.aaaaaaa
 
@@ -32,21 +32,21 @@ refuses "first publish needs --initial" "pass --initial" \
     rebuild --live "$(serve "$empty")" --component main --debs "$scratch/none" --out "$scratch/x"
 
 desktop 1 "$d1"
-for p in unbound-archive-keyring unbound-apt-source; do make_deb "$scratch/in-1" $p 1.0 all; done
+for p in bande-archive-keyring bande-apt-source; do make_deb "$scratch/in-1" $p 1.0 all; done
 check "initial desktop publish" rebuild --initial --live "$(serve "$empty")" --component main --debs "$scratch/in-1" --out "$scratch/site-1"
-check "main carries the build on amd64 and arm64" both "$scratch/site-1" main "unbound-compositor=$d1"
-check "main carries the architecture-independent packages on both" both "$scratch/site-1" main "unbound-desktop=$d1"
-check "main carries the repository packages" both "$scratch/site-1" main unbound-apt-source=1.0
+check "main carries the build on amd64 and arm64" both "$scratch/site-1" main "bande-compositor=$d1"
+check "main carries the architecture-independent packages on both" both "$scratch/site-1" main "bande-desktop=$d1"
+check "main carries the repository packages" both "$scratch/site-1" main bande-apt-source=1.0
 check "apple starts empty" sh -c "[ -z \"\$(grep '^Package:' '$scratch/site-1/dists/rolling/apple/binary-arm64/Packages')\" ]"
 check "Release lists both components and architectures" sh -c \
     "grep -q '^Components: main apple' '$scratch/site-1/dists/rolling/Release' && grep -q '^Architectures: amd64 arm64' '$scratch/site-1/dists/rolling/Release'"
 check "index carries the fingerprint" grep -q "$(gpg --with-colons --show-keys "$conf/archive-key.asc" | awk -F: '/^fpr/ { print $10; exit }')" "$scratch/site-1/index.html"
 check "key.asc is published" cmp "$conf/archive-key.asc" "$scratch/site-1/key.asc"
 
-kernel k1 7.2.12 7.2.12-1+unbound1
+kernel k1 7.2.12 7.2.12-1+bande1
 check "kernel publish" rebuild --live "$(serve "$scratch/site-1")" --component apple --debs "$scratch/in-k1" --out "$scratch/site-k1"
-check "apple carries the kernel on arm64" has "$scratch/site-k1" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+unbound1
-check "apple carries unbound-os-apple" has "$scratch/site-k1" apple arm64 unbound-os-apple=7.2.12-1+unbound1
+check "apple carries the kernel on arm64" has "$scratch/site-k1" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
+check "apple carries bande-os-apple" has "$scratch/site-k1" apple arm64 bande-os-apple=7.2.12-1+bande1
 check "apple stays empty on amd64" sh -c "[ -z \"\$(grep '^Package:' '$scratch/site-k1/dists/rolling/apple/binary-amd64/Packages')\" ]"
 check "a kernel publish keeps main" diff <(listed "$scratch/site-1" main arm64) <(listed "$scratch/site-k1" main arm64)
 
@@ -56,25 +56,25 @@ for n in 2 3 4; do
     check "desktop publish $n" rebuild --live "$(serve "$site")" --component main --debs "$scratch/in-$n" --out "$scratch/site-$n"
     site=$scratch/site-$n
 done
-check "main carries the newest build" both "$site" main unbound-compositor=0.0.0+git20261030.4.bbbbbb4
-check "main dropped the previous build" lacks "$site" main amd64 unbound-compositor=0.0.0+git20261030.3.bbbbbb3
-check "dropped files leave the pool" test ! -e "$site/pool/main/u/unbound-compositor/unbound-compositor_${d1}_arm64.deb"
-check "repository packages survive rebuilds" has "$site" main arm64 unbound-archive-keyring=1.0
-check "desktop publishes keep the kernel" has "$site" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+unbound1
+check "main carries the newest build" both "$site" main bande-compositor=0.0.0+git20261030.4.bbbbbb4
+check "main dropped the previous build" lacks "$site" main amd64 bande-compositor=0.0.0+git20261030.3.bbbbbb3
+check "dropped files leave the pool" test ! -e "$site/pool/main/b/bande-compositor/bande-compositor_${d1}_arm64.deb"
+check "repository packages survive rebuilds" has "$site" main arm64 bande-archive-keyring=1.0
+check "desktop publishes keep the kernel" has "$site" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
 
-kernel k2 7.2.14 7.2.14-1+unbound1
+kernel k2 7.2.14 7.2.14-1+bande1
 check "a second kernel" rebuild --live "$(serve "$site")" --component apple --debs "$scratch/in-k2" --out "$scratch/site-k2"
-check "two kernels are both kept" has "$scratch/site-k2" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+unbound1
-check "the second kernel is in" has "$scratch/site-k2" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+unbound1
-kernel k3 7.3.1 7.3.1-1+unbound2
+check "two kernels are both kept" has "$scratch/site-k2" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
+check "the second kernel is in" has "$scratch/site-k2" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+bande1
+kernel k3 7.3.1 7.3.1-1+bande2
 check "a third kernel" rebuild --live "$(serve "$scratch/site-k2")" --component apple --debs "$scratch/in-k3" --out "$scratch/site-k3"
 site=$scratch/site-k3
-check "the newest kernel is in" has "$site" apple arm64 linux-image-7.3.1-apple-arm64-16k=7.3.1-1+unbound2
-check "the one before it stays" has "$site" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+unbound1
-check "the oldest kernel is dropped" lacks "$site" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+unbound1
+check "the newest kernel is in" has "$site" apple arm64 linux-image-7.3.1-apple-arm64-16k=7.3.1-1+bande2
+check "the one before it stays" has "$site" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+bande1
+check "the oldest kernel is dropped" lacks "$site" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
 check "its file leaves the pool" sh -c "! find '$site/pool' -name 'linux-image-7.2.12-*' | grep -q ."
-check "the kernel metapackage follows the newest kernel" has "$site" apple arm64 linux-image-apple-arm64-16k=7.3.1-1+unbound2
-check "unbound-os-apple follows the newest kernel" has "$site" apple arm64 unbound-os-apple=7.3.1-1+unbound2
+check "the kernel metapackage follows the newest kernel" has "$site" apple arm64 linux-image-apple-arm64-16k=7.3.1-1+bande2
+check "bande-os-apple follows the newest kernel" has "$site" apple arm64 bande-os-apple=7.3.1-1+bande2
 check "main is untouched by kernels" diff <(listed "$scratch/site-4" main amd64) <(listed "$site" main amd64)
 
 live=$(serve "$site")
@@ -84,27 +84,27 @@ refuses "an older build is refused" "is older than" \
     rebuild --live "$live" --component main --debs "$scratch/in-2" --out "$scratch/older"
 refuses "an older kernel is refused" "is older than" \
     rebuild --live "$live" --component apple --debs "$scratch/in-k2" --out "$scratch/older-kernel"
-make_deb "$scratch/in-changed" unbound-compositor 0.0.0+git20261030.4.bbbbbb4 arm64 changed
+make_deb "$scratch/in-changed" bande-compositor 0.0.0+git20261030.4.bbbbbb4 arm64 changed
 refuses "a changed package under a published version is refused" "different contents" \
     rebuild --live "$live" --component main --debs "$scratch/in-changed" --out "$scratch/changed"
-make_deb "$scratch/in-split" unbound-compositor 0.0.0+git20261031.5.ccccccc arm64
-make_deb "$scratch/in-split" unbound-greeter 0.0.0+git20261031.6.ddddddd arm64
+make_deb "$scratch/in-split" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
+make_deb "$scratch/in-split" bande-greeter 0.0.0+git20261031.6.ddddddd arm64
 refuses "one architecture's packages of two versions are refused" "arm64 packages carry different versions" \
     rebuild --live "$live" --component main --debs "$scratch/in-split" --out "$scratch/split"
-make_deb "$scratch/in-split-all" unbound-compositor 0.0.0+git20261031.5.ccccccc arm64
-make_deb "$scratch/in-split-all" unbound-desktop 0.0.0+git20261031.6.ddddddd all
+make_deb "$scratch/in-split-all" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
+make_deb "$scratch/in-split-all" bande-desktop 0.0.0+git20261031.6.ddddddd all
 refuses "an architecture-independent package of another version is refused" "arm64 packages carry different versions" \
     rebuild --live "$live" --component main --debs "$scratch/in-split-all" --out "$scratch/split-all"
-make_deb "$scratch/in-mixed" unbound-compositor 0.0.0+git20261031.5.ccccccc amd64
-make_deb "$scratch/in-mixed" unbound-compositor 0.0.0+git20261031.5.ccccccc arm64
-make_deb "$scratch/in-mixed" unbound-apt-source 1.1 all
+make_deb "$scratch/in-mixed" bande-compositor 0.0.0+git20261031.5.ccccccc amd64
+make_deb "$scratch/in-mixed" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
+make_deb "$scratch/in-mixed" bande-apt-source 1.1 all
 check "repository packages carry their own version" rebuild --live "$live" --component main --debs "$scratch/in-mixed" --out "$scratch/mixed"
-make_deb "$scratch/in-misplaced" unbound-archive-keyring 1.1 all
+make_deb "$scratch/in-misplaced" bande-archive-keyring 1.1 all
 refuses "repository packages stay in main" "belongs in main" \
     rebuild --live "$live" --component apple --debs "$scratch/in-misplaced" --out "$scratch/misplaced"
 
-make_deb "$scratch/in-arm64" unbound-compositor "$d1" arm64
-make_deb "$scratch/in-arm64" unbound-desktop "$d1" all
+make_deb "$scratch/in-arm64" bande-compositor "$d1" arm64
+make_deb "$scratch/in-arm64" bande-desktop "$d1" all
 partial_conf=$scratch/partial-conf
 cp -r "$conf" "$partial_conf"
 sed -i 's/^Architectures: .*/Architectures: arm64/; s/^Components: .*/Components: main/' "$partial_conf/distributions"
@@ -114,13 +114,13 @@ sed -i 's/^Architectures: .*/Architectures: arm64/; s/^Components: .*/Components
 check "a live Release without amd64 and apple is taken" sh -c \
     "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/partial")' --component apple --debs '$scratch/in-k1' --out '$scratch/grown' > '$scratch/grown.log'"
 check "it says what starts empty" grep -q "does not list apple/binary-amd64/Packages.xz yet" "$scratch/grown.log"
-check "the arm64 packages carry over" has "$scratch/grown" main arm64 "unbound-compositor=$d1"
-check "the new architecture starts empty" lacks "$scratch/grown" main amd64 "unbound-compositor=$d1"
-check "the new component takes the kernel" has "$scratch/grown" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+unbound1
+check "the arm64 packages carry over" has "$scratch/grown" main arm64 "bande-compositor=$d1"
+check "the new architecture starts empty" lacks "$scratch/grown" main amd64 "bande-compositor=$d1"
+check "the new component takes the kernel" has "$scratch/grown" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
 
 tampered=$(mktemp -d -p "$scratch")
 cp -r "$site/." "$tampered/"
-echo x >> "$tampered/pool/main/u/unbound-desktop/unbound-desktop_0.0.0+git20261030.4.bbbbbb4_all.deb"
+echo x >> "$tampered/pool/main/b/bande-desktop/bande-desktop_0.0.0+git20261030.4.bbbbbb4_all.deb"
 refuses "a tampered pool file is refused" "does not match its signed index" \
     "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$tampered")" --component main --debs "$scratch/in-4" --out "$scratch/t1"
 cp -r "$site/." "$tampered/"
@@ -162,7 +162,7 @@ Dir::Cache::Archives "$lists/archives";
 Dir::State::status "$lists/status";
 Debug::NoLocking "true";
 EOF
-cat > "$lists/sources.d/unbound.sources" <<EOF
+cat > "$lists/sources.d/bande.sources" <<EOF
 Types: deb
 URIs: $(serve "$site")
 Suites: rolling
@@ -171,14 +171,14 @@ Signed-By: $lists/keyring.gpg
 EOF
 apt_env=(env APT_CONFIG="$lists/apt.conf")
 check "apt accepts the signed archive" "${apt_env[@]}" apt-get update -o APT::Update::Error-Mode=any
-check "apt sees the newest desktop build" sh -c "APT_CONFIG='$lists/apt.conf' apt-cache policy unbound-compositor | grep -q 'Candidate: 0.0.0+git20261030.4.bbbbbb4'"
+check "apt sees the newest desktop build" sh -c "APT_CONFIG='$lists/apt.conf' apt-cache policy bande-compositor | grep -q 'Candidate: 0.0.0+git20261030.4.bbbbbb4'"
 if [ "$host_arch" = arm64 ]; then
-    check "apt on arm64 sees the newest kernel" sh -c "APT_CONFIG='$lists/apt.conf' apt-cache policy unbound-os-apple | grep -q 'Candidate: 7.3.1-1+unbound2'"
+    check "apt on arm64 sees the newest kernel" sh -c "APT_CONFIG='$lists/apt.conf' apt-cache policy bande-os-apple | grep -q 'Candidate: 7.3.1-1+bande2'"
 else
-    check "apt on $host_arch sees no kernel" sh -c "! APT_CONFIG='$lists/apt.conf' apt-cache policy unbound-os-apple | grep -q Candidate"
+    check "apt on $host_arch sees no kernel" sh -c "! APT_CONFIG='$lists/apt.conf' apt-cache policy bande-os-apple | grep -q Candidate"
 fi
-check "apt downloads from it" "${apt_env[@]}" apt-get install -y -q --download-only unbound-compositor
-check "the download is the newest build" test -e "$lists/archives/unbound-compositor_0.0.0+git20261030.4.bbbbbb4_${host_arch}.deb"
+check "apt downloads from it" "${apt_env[@]}" apt-get install -y -q --download-only bande-compositor
+check "the download is the newest build" test -e "$lists/archives/bande-compositor_0.0.0+git20261030.4.bbbbbb4_${host_arch}.deb"
 
 cp "$conf/archive-key.asc" "$scratch/old-key.asc"
 add_archive_key "$conf"

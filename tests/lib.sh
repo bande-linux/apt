@@ -48,7 +48,7 @@ make_conf() {
     mkdir -p "$GNUPGHOME"
     chmod 700 "$GNUPGHOME"
     cp "$root"/conf/{options,distributions} "$conf/"
-    gpg --batch --quiet --passphrase '' --quick-generate-key 'Unbound test archive key' ed25519 cert never
+    gpg --batch --quiet --passphrase '' --quick-generate-key 'Bande test archive key' ed25519 cert never
     primary=$(gpg --with-colons --list-keys | awk -F: '/^fpr/ { print $10; exit }')
     gpg --batch --quiet --passphrase '' --quick-add-key "$primary" ed25519 sign "$expiry"
     echo "$primary" > "$conf/signing-keys"
@@ -58,7 +58,7 @@ make_conf() {
 
 add_archive_key() {
     local conf=$1 primary
-    gpg --batch --quiet --passphrase '' --quick-generate-key "Unbound test archive key $RANDOM" ed25519 cert never
+    gpg --batch --quiet --passphrase '' --quick-generate-key "Bande test archive key $RANDOM" ed25519 cert never
     primary=$(gpg --with-colons --list-keys | awk -F: '/^fpr/ { f = $10 } END { print f }')
     gpg --batch --quiet --passphrase '' --quick-add-key "$primary" ed25519 sign 2y
     echo "$primary" >> "$conf/signing-keys"

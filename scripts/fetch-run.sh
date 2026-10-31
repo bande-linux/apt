@@ -1,9 +1,9 @@
 #!/bin/bash
 # Usage: fetch-run.sh REPO RUN_ID OUT_DIR
-# Verifies a CI run of unbound-linux/REPO (desktop or kernel): the repository's
+# Verifies a CI run of bande-linux/REPO (desktop or kernel): the repository's
 # release workflow, finished green, its commit on main. A desktop run must be
 # the push of a vX.Y.Z tag that points at the run's commit, and its packages
-# carry X.Y.Z. A kernel run must be a schedule or dispatch on main. Then downloads its unbound-debs-ARCH artifacts into
+# carry X.Y.Z. A kernel run must be a schedule or dispatch on main. Then downloads its bande-debs-ARCH artifacts into
 # OUT_DIR and checks that they carry only the repository's own package names,
 # every architecture it builds and the same packages for each. Prints
 # component= and appends it to $GITHUB_OUTPUT when set. Needs GH_TOKEN with
@@ -17,7 +17,7 @@ source_repo=$1 run=$2 out=$3
 api=${GITHUB_API_URL:-https://api.github.com}
 wait_limit=${FETCH_RUN_WAIT:-900}
 poll=${FETCH_RUN_POLL:-15}
-repository_packages=" unbound-archive-keyring unbound-apt-source "
+repository_packages=" bande-archive-keyring bande-apt-source "
 fail() { echo "fetch-run: $*" >&2; exit 1; }
 
 # Per repository: its workflow, the events it publishes from, the package names
@@ -27,21 +27,21 @@ case $source_repo in
     desktop)
         workflow=.github/workflows/release.yml
         events=(push)
-        names=('unbound-*' xdg-desktop-portal-unbound)
+        names=('bande-*' xdg-desktop-portal-bande)
         component=main
         architectures=(amd64 arm64 all)
         ;;
     kernel)
         workflow=.github/workflows/follow-debian.yml
         events=(schedule workflow_dispatch)
-        names=('linux-*-apple-*' unbound-os-apple)
+        names=('linux-*-apple-*' bande-os-apple)
         component=apple
         architectures=(arm64)
-        version_form='^[0-9][^ ]*\+unbound[0-9]+$'
+        version_form='^[0-9][^ ]*\+bande[0-9]+$'
         ;;
     *) fail "unknown repository $source_repo; the archive takes desktop and kernel" ;;
 esac
-repo=unbound-linux/$source_repo
+repo=bande-linux/$source_repo
 
 call() {
     curl -fsSL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
@@ -92,7 +92,7 @@ mkdir -p "$out"
 : > "$work/names"
 shopt -s nullglob
 for arch in "${architectures[@]}"; do
-    name=unbound-debs-$arch
+    name=bande-debs-$arch
     id=$(jq -r --arg n "$name" '[.artifacts[] | select(.name == $n)] | if length == 1 then .[0].id else "" end' \
         "$work/artifacts.json")
     [ -n "$id" ] || fail "run $run has no single $name artifact"
