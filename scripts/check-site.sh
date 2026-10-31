@@ -23,7 +23,7 @@ for inrelease in "$site"/dists/*/InRelease; do
             [ -e "$dist/$path" ] || fail "$dist/$path is listed in Release but missing"
             echo "$sha  $dist/$path" | sha256sum -c --quiet - || fail "$dist/$path does not match Release"
         done
-    for packages in "$dist"/main/binary-*/Packages; do
+    for packages in "$dist"/*/binary-*/Packages; do
         awk -v RS= '{
             for (i = 1; i <= NF; i++) { if ($i == "Filename:") f = $(i + 1); if ($i == "SHA256:") s = $(i + 1) }
             print s, f

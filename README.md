@@ -7,48 +7,88 @@ git.
 
 Install instructions for users are on the site ([`site/index.html`](site/index.html)).
 
-## Channels
+## The archive
 
-| Channel | Suite | Fed by |
-|---|---|---|
-| release | `trixie` | `vX.Y.Z` tags of `unbound-linux/desktop`: the green `main` build of the tagged commit, promoted to `X.Y.Z` |
-| testing | `trixie-testing` | every green push to `main` of `unbound-linux/desktop` |
+One suite, `rolling`, for Debian testing:
 
-Each suite carries one version of each package: the newest, as in Debian's own suites. The
-repository packages (`unbound-archive-keyring`, `unbound-apt-source`,
-`unbound-apt-source-testing`) are published to both suites.
+| Component | Architectures | Fed by | Names |
+|---|---|---|---|
+| `main` | amd64, arm64 | green `release.yml` runs on `main` of `unbound-linux/desktop` | `unbound-*`, `xdg-desktop-portal-unbound` |
+| `apple` | arm64 | green `follow-debian.yml` runs on `main` of `unbound-linux/kernel` | `linux-*-apple-*`, `unbound-os-apple` |
+
+Each package keeps its newest version only, as in Debian's own suites. Kernel packages carry
+the kernel version in their name, so `apple` keeps the packages of the newest two kernel
+versions and drops older ones; kernel debs are large and the site must stay under the Pages
+limit. The repository packages (`unbound-archive-keyring`, `unbound-apt-source`) live in `main`.
 
 ## How a publish works
 
-1. [`scripts/fetch-run.sh`](scripts/fetch-run.sh) checks a desktop CI run:
-   - it must be a push to `main`, or the run of a `vX.Y.Z` tag;
-   - every other job must be green and the commit must be on `main`;
-   - for a tag, `Cargo.toml` must declare the tag's version.
+The last job of a source repository's release run dispatches
+[`publish.yml`](.github/workflows/publish.yml) with `repo` (`desktop` or `kernel`) and the run's
+`run_id`. Publishes share the `pages` concurrency group, so they run one at a time. GitHub keeps
+only the newest pending run of a group: when three publishes overlap, the middle one is
+cancelled, and that repository's build arrives with its next run.
 
-   It then downloads the `unbound-debs-*` artifacts. For a release it promotes the `main`
-   packages to the tag's version with [`scripts/promote.sh`](scripts/promote.sh), which changes
-   only their control files.
+1. [`scripts/fetch-run.sh`](scripts/fetch-run.sh) checks the run:
+   - it must come from the repository's release workflow, be a `push`, `schedule` or
+     `workflow_dispatch` run on `main`, and end in success (it waits for the run to finish);
+   - its commit must still be on `main`.
+
+   It then downloads the `unbound-debs-ARCH` artifacts. The desktop uploads `amd64`, `arm64`
+   and `all`; the kernel uploads `arm64`. It refuses:
+   - package names outside the repository's list;
+   - a package filed under another architecture's artifact;
+   - versions of the wrong form: `X.Y.Z+gitDATE.COUNT.SHA` naming the run's commit for the
+     desktop, `<debian-version>+unboundN` for the kernel;
+   - an incomplete architecture: one that lacks a package another architecture carries.
 2. [`scripts/rebuild.sh`](scripts/rebuild.sh) rebuilds the whole archive with reprepro in a fresh
    database:
    - its input is the live site, whose `InRelease` signatures, `Packages` and pool checksums are
      all verified, plus the new packages;
-   - it refuses a version older than the live one and refuses changed contents under a
-     published version;
+   - a component or architecture that the live `Release` does not list yet starts empty;
+   - on each architecture, the new packages (with the architecture-independent ones) must
+     carry one version, the repository packages aside;
+   - it refuses a version older than the live one and changed contents under a published
+     version;
    - it signs with every key in [`conf/signing-keys`](conf/signing-keys).
 3. [`scripts/check-site.sh`](scripts/check-site.sh) checks the result before deploying:
-   signatures, checksums, no unlisted pool files, no file over 95 MB, and the site under 800 MB.
+   signatures, checksums, no unlisted pool files, no file over 95 MB, and the site under 800 MB
+   (a warning over 600 MB).
 
 No state is kept between runs: the live site is the source of truth.
 
-[`publish.yml`](.github/workflows/publish.yml) runs these steps. The last job of desktop's CI
-starts it with the run id, and with the tag for a release.
-- **Release publishes** wait for approval in the `apt-stable-approval` environment.
+- **Access:** the GitHub App whose client id and key are `DESKTOP_READER_CLIENT_ID` and
+  `DESKTOP_READER_KEY` must be installed on both `desktop` and `kernel`, with Actions and
+  Contents read access. The publish asks it for a token limited to the one repository.
 - **Signing:** the signing subkey is a secret of the `apt-publish` environment, which only `main`
   can use.
 - **Deploy:** the site is deployed with `actions/deploy-pages`.
 - **Bootstrap release:** when the repository packages reach a new version,
   [`scripts/bootstrap-release.sh`](scripts/bootstrap-release.sh) creates the GitHub release
   `apt-source-VERSION`, which users download in the first install step.
+
+## First publish
+
+The site holds no archive yet, so the first publish must say so; every later one refuses to run
+without a live, signed `InRelease`.
+
+1. Find a green desktop `release.yml` run on `main`:
+
+   ```bash
+   gh run list -R unbound-linux/desktop -w release.yml -b main -s success -L 1
+   ```
+
+2. Publish it:
+
+   ```bash
+   gh workflow run publish.yml -R unbound-linux/apt -f repo=desktop -f run_id=RUN_ID -f initial=true
+   ```
+
+3. Check <https://unbound-linux.github.io/apt/dists/rolling/InRelease> and the
+   `apt-source-VERSION` release, then `apt install unbound-desktop` in a fresh Debian testing
+   on amd64 and arm64.
+
+The kernel's first publish needs no `initial`: it adds `apple` to the live archive.
 
 ## Signing keys
 
@@ -68,11 +108,17 @@ subkeys run out.
 
 ## Testing locally
 
+On Debian, as root install the tools, then run the tests as any user:
+
 ```bash
-docker run --rm -v "$PWD":/apt -w /apt debian:trixie \
-    sh -c 'apt-get update -qq && xargs apt-get install -y -qq --no-install-recommends < ci/packages && tests/run-all.sh'
+sudo sh -c 'xargs apt-get install -y -qq --no-install-recommends < ci/packages'
 ```
 
-The tests build throwaway keys and packages, serve sites over local HTTP, and check publishing,
-promotion, tampering and forged signatures. They also check rotation, and that apt itself
-updates from and installs out of the result.
+```bash
+tests/run-all.sh
+```
+
+The tests build throwaway keys and packages for amd64 and arm64, serve sites and a fake GitHub
+API over local HTTP, and check both source repositories, publishing to both components, the
+kernel limit, tampering and forged signatures. They also check rotation, and that apt itself
+updates from and downloads out of the result, without touching the machine's own apt state.

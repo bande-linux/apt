@@ -1,19 +1,17 @@
 name: publish
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
+      repo:
+        description: Repository whose run to publish
+        required: true
+        type: choice
+        options: [desktop, kernel]
       run_id:
-        description: Desktop CI run whose packages to publish
+        description: Its release run (desktop release.yml, kernel follow-debian.yml)
         required: true
         type: string
-      tag:
-        description: vX.Y.Z to publish to the release channel; empty publishes to testing
-        required: false
-        type: string
-        default: ''
       initial:
         description: The site holds no archive yet (first publish only)
         required: false
@@ -27,25 +25,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  approve:
-    if: inputs.tag != ''
-    runs-on: ubuntu-24.04
-    container: debian:trixie
-    environment: apt-stable-approval
-    steps:
-      - name: Approved for the release channel
-        env:
-          TAG: ${{ inputs.tag }}
-          RUN_ID: ${{ inputs.run_id }}
-        run: echo "Publishing $TAG from desktop run $RUN_ID to the release channel"
-
   build:
-    needs: approve
-    if: ${{ !cancelled() && (needs.approve.result == 'success' || needs.approve.result == 'skipped') }}
     runs-on: ubuntu-24.04
     container: debian:trixie
     environment: apt-publish
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
     outputs:
@@ -59,14 +43,14 @@ jobs:
           apt-get update -qq
           xargs apt-get install -y -qq --no-install-recommends < ci/packages
 
-      - name: Token for the desktop repository (actions/create-github-app-token v3)
+      - name: Token for the source repository (actions/create-github-app-token v3)
         id: token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
         with:
           client-id: ${{ vars.DESKTOP_READER_CLIENT_ID }}
           private-key: ${{ secrets.DESKTOP_READER_KEY }}
           owner: unbound-linux
-          repositories: desktop
+          repositories: ${{ inputs.repo }}
           permission-actions: read
           permission-contents: read
 
@@ -74,9 +58,9 @@ jobs:
         id: fetch
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPO: ${{ inputs.repo }}
           RUN_ID: ${{ inputs.run_id }}
-          TAG: ${{ inputs.tag }}
-        run: scripts/fetch-run.sh "$RUN_ID" debs ${TAG:+"$TAG"}
+        run: scripts/fetch-run.sh "$REPO" "$RUN_ID" debs
 
       - name: Restore the pool cache (actions/cache v6)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
@@ -88,7 +72,7 @@ jobs:
       - name: Rebuild and sign the archive
         env:
           APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
-          CHANNEL: ${{ steps.fetch.outputs.channel }}
+          COMPONENT: ${{ steps.fetch.outputs.component }}
           INITIAL: ${{ inputs.initial }}
         run: |
           GNUPGHOME=$(mktemp -d)
@@ -96,7 +80,7 @@ jobs:
           printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --quiet --import
           initial=()
           [ "$INITIAL" != true ] || initial=(--initial)
-          scripts/rebuild.sh --live https://unbound-linux.github.io/apt --channel "$CHANNEL" \
+          scripts/rebuild.sh --live https://unbound-linux.github.io/apt --component "$COMPONENT" \
             --debs debs --out public --cache pool-cache "${initial[@]}"
           gpgconf --kill all
           rm -rf "$GNUPGHOME"
@@ -121,7 +105,6 @@ jobs:
           path: |
             debs/unbound-archive-keyring_*_all.deb
             debs/unbound-apt-source_*_all.deb
-            debs/unbound-apt-source-testing_*_all.deb
           if-no-files-found: error
 
   deploy:

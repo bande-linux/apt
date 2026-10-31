@@ -21,33 +21,36 @@ p code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
 <body>
 <main>
 <h1>Unbound</h1>
-<p class="lead">APT repository for the Unbound desktop on Debian 13 (trixie), arm64.</p>
+<p class="lead">APT repository for the Unbound desktop on Debian testing, amd64 and arm64. One rolling
+suite: every build that passes CI ships.</p>
 
 <h2>Install</h2>
-<p>Choose a channel. <strong>Release</strong> carries tagged versions only. <strong>Testing</strong>
-carries the newest build of every change merged to <code>main</code>. Your machine then updates
-from that channel alone.</p>
-<p>1. Download the keyring and the channel package from the latest GitHub release, and install both.
-For the release channel:</p>
+<p>On Debian testing (packages here are built against testing and do not install on Debian 13).</p>
+<p>1. Download the keyring and the source package from the latest GitHub release, and install both:</p>
 <pre><code>cd /tmp
 wget https://github.com/unbound-linux/apt/releases/latest/download/unbound-archive-keyring.deb \
      https://github.com/unbound-linux/apt/releases/latest/download/unbound-apt-source.deb
 sudo apt install ./unbound-archive-keyring.deb ./unbound-apt-source.deb</code></pre>
-<p>For testing, use <code>unbound-apt-source-testing.deb</code> in both places.</p>
+<p>This adds <code>/etc/apt/sources.list.d/unbound.sources</code>:</p>
+<pre><code>Types: deb
+URIs: https://unbound-linux.github.io/apt
+Suites: rolling
+Components: main apple
+Signed-By: /usr/share/keyrings/unbound-archive-keyring.pgp</code></pre>
 <p>2. Install the desktop:</p>
 <pre><code>sudo apt update
 sudo apt install unbound-desktop</code></pre>
 <p>Log out and choose <strong>Unbound</strong> at the login screen. Updates arrive with
 <code>sudo apt upgrade</code>.</p>
 
-<h2>Switch channel</h2>
-<pre><code>sudo apt install unbound-apt-source-testing   # to testing
-sudo apt install unbound-apt-source           # to release</code></pre>
-<p>Going back to release does not downgrade anything: packages keep their testing version until
-a release passes it.</p>
+<h2>Components</h2>
+<p><code>main</code> (amd64, arm64) holds the desktop, <code>unbound-os</code> and the repository
+packages. <code>apple</code> (arm64) holds the Mac mini M2 kernel, built from Debian's kernel
+with the Apple patches, and <code>unbound-os-apple</code>; it carries the newest two kernel
+versions.</p>
 
 <h2>Remove</h2>
-<pre><code>sudo apt purge unbound-apt-source unbound-apt-source-testing unbound-archive-keyring</code></pre>
+<pre><code>sudo apt purge unbound-apt-source unbound-archive-keyring</code></pre>
 
 <h2>Signing key</h2>
 <p>Packages and indices are signed with the Unbound archive key

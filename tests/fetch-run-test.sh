@@ -2,87 +2,104 @@
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/lib.sh"
 
-repo=unbound-linux/desktop
 sha=788731fba292303f508c4dddda080bafd65aba29
-other=1111111111111111111111111111111111111111
-main_version=0.0.0+git20261029.35.788731f
-export GH_TOKEN=test DESKTOP_REPO=$repo
+desktop_version=0.0.0+git20261029.35.788731f
+kernel_version=7.2.12-1+unbound1
+kernel_abi=7.2.12-apple-arm64-16k
+export GH_TOKEN=test FETCH_RUN_POLL=1
 
+# Run 7 of a source repository, served as the GitHub API. Settings, all
+# optional: event, ref, status, conclusion, compare, workflow. Packages are
+# made with the functions below into $d/art/ARCH, one artifact per directory.
+desktop_debs() {
+    local d=$1 version=${2:-$desktop_version} arch
+    for arch in amd64 arm64; do
+        make_deb "$d/art/$arch" unbound-compositor "$version" $arch
+        make_deb "$d/art/$arch" xdg-desktop-portal-unbound "$version" $arch
+    done
+    make_deb "$d/art/all" unbound-desktop "$version" all
+    make_deb "$d/art/all" unbound-apt-source 1.0 all
+    make_deb "$d/art/all" unbound-archive-keyring 1.0 all
+}
+kernel_debs() {
+    local d=$1 version=${2:-$kernel_version}
+    make_deb "$d/art/arm64" "linux-image-$kernel_abi" "$version" arm64
+    make_deb "$d/art/arm64" linux-image-apple-arm64-16k "$version" arm64
+    make_deb "$d/art/arm64" unbound-os-apple "$version" arm64
+}
 api() {
-    local dir=$1 ref=$2 event=$3 version=$4 failing=${5:-} compare=${6:-ahead} cargo=${7:-0.1.0} tagged=${8:-$sha}
-    local base=$dir/repos/$repo debs=$dir/debs conclusion=success
-    mkdir -p "$base/actions/runs/7" "$base/actions/artifacts/9" "$base/compare" "$base/git/ref/tags" "$base/git/tags" \
-        "$base/contents" "$debs"
-    jq -n --arg e "$event" --arg r "$ref" --arg s "$sha" --arg o "$repo" \
-        '{event: $e, path: ".github/workflows/ci.yml", head_branch: $r, head_sha: $s, head_repository: {full_name: $o}}' \
-        > "$base/actions/runs/7/index.html"
-    [ -z "$failing" ] || conclusion=failure
-    jq -n --arg c "$conclusion" '{jobs: [
-        {name: "ci/lint", status: "completed", conclusion: "success"},
-        {name: "ci/deb", status: "completed", conclusion: $c},
-        {name: "ci/publish", status: "in_progress", conclusion: null}]}' > "$base/actions/runs/7/jobs"
-    jq -n '{artifacts: [{id: 9, name: "unbound-debs-arm64"}, {id: 8, name: "screendumps"}]}' > "$base/actions/runs/7/artifacts"
-    jq -n --arg s "$compare" '{status: $s}' > "$base/compare/$sha...main"
-    jq -n --arg s "$tagged" '{object: {type: "commit", sha: $s}}' > "$base/git/ref/tags/v0.1.0"
-    jq -n --arg s "$sha" '{object: {type: "tag", sha: "abcd"}}' > "$base/git/ref/tags/v0.1.1"
-    jq -n --arg s "$sha" '{object: {type: "commit", sha: $s}}' > "$base/git/tags/abcd"
-    printf '[workspace]\nmembers = ["crates/*"]\n\n[workspace.package]\nversion = "%s"\nedition = "2024"\n' "$cargo" |
-        base64 -w0 | jq -R '{content: .}' > "$base/contents/Cargo.toml"
-    make_deb "$debs" unbound-compositor "$version" arm64
-    make_deb "$debs" unbound-apt-source 1.0 all
-    tree=$(mktemp -d -p "$scratch")
-    mkdir -p "$tree/DEBIAN"
-    printf 'Package: unbound-desktop\nVersion: %s\nArchitecture: all\nMaintainer: T <t@example.org>\nSection: misc\nPriority: optional\nDepends: unbound-compositor (= %s), dbus-user-session\nDescription: test\n' \
-        "$version" "$version" > "$tree/DEBIAN/control"
-    dpkg-deb --root-owner-group -b "$tree" "$debs/unbound-desktop_${version}_all.deb" > /dev/null
-    (cd "$debs" && python3 -m zipfile -c "$base/actions/artifacts/9/zip" ./*.deb)
+    local d=$1 repo=unbound-linux/$2 base id=20 arch workflow=${workflow:-}
+    base=$d/repos/$repo
+    [ -n "$workflow" ] || case $2 in desktop) workflow=release.yml ;; *) workflow=follow-debian.yml ;; esac
+    mkdir -p "$base/actions/runs/7" "$base/actions/artifacts" "$base/compare"
+    jq -n --arg e "${event:-push}" --arg r "${ref:-main}" --arg s "$sha" --arg o "$repo" --arg w "$workflow" \
+        --arg st "${status:-completed}" --arg c "${conclusion:-success}" \
+        '{event: $e, path: (".github/workflows/" + $w), head_branch: $r, head_sha: $s, head_repository: {full_name: $o},
+          status: $st, conclusion: (if $st == "completed" then $c else null end)}' > "$base/actions/runs/7/index.html"
+    jq -n --arg s "${compare:-ahead}" '{status: $s}' > "$base/compare/$sha...main"
+    echo '{"artifacts": [{"id": 8, "name": "screendumps"}]}' > "$base/actions/runs/7/artifacts"
+    for arch in "$d"/art/*; do
+        id=$((id + 1))
+        mkdir -p "$base/actions/artifacts/$id"
+        (cd "$arch" && python3 -m zipfile -c "$base/actions/artifacts/$id/zip" ./*.deb)
+        jq --arg n "unbound-debs-$(basename "$arch")" --argjson i "$id" '.artifacts += [{id: $i, name: $n}]' \
+            "$base/actions/runs/7/artifacts" > "$d/artifacts" && mv "$d/artifacts" "$base/actions/runs/7/artifacts"
+    done
     export GITHUB_API_URL
-    GITHUB_API_URL=$(serve "$dir")
+    GITHUB_API_URL=$(serve "$d")
 }
 
 case_dir() { mktemp -d -p "$scratch"; }
-fetch() { "$root/scripts/fetch-run.sh" 7 "$@"; }
+fetch() { "$root/scripts/fetch-run.sh" "$1" 7 "$2"; }
 
-d=$(case_dir); api "$d" main push "$main_version"
-check "a green main run feeds testing" sh -c "'$root/scripts/fetch-run.sh' 7 '$d/out' | grep -qx channel=testing"
-check "its packages are downloaded" test -e "$d/out/unbound-compositor_${main_version}_arm64.deb"
-
-d=$(case_dir); api "$d" feature push "$main_version"
-refuses "a branch run is refused" "testing takes pushes to main" fetch "$d/out"
-d=$(case_dir); api "$d" main push "$main_version" failing
-refuses "a run with a failed job is refused" "did not succeed" fetch "$d/out"
-d=$(case_dir); api "$d" main push "$main_version" "" diverged
-refuses "a commit off main is refused" "is not on main" fetch "$d/out"
-d=$(case_dir); api "$d" main push 0.0.0+git20261029.35.0000000
-refuses "a version naming another commit is refused" "carries version" fetch "$d/out"
-d=$(case_dir); api "$d" main push "$main_version"
-make_deb "$d/extra" libc6 9.9 arm64
-(cd "$d/extra" && python3 -m zipfile -c "$d/repos/$repo/actions/artifacts/9/zip" ./*.deb "$d"/debs/*.deb)
-refuses "a package outside the archive's names is refused" "does not carry" fetch "$d/out"
-
-d=$(case_dir); api "$d" main push "$main_version"
-check "a tag promotes the main run to stable" sh -c "'$root/scripts/fetch-run.sh' 7 '$d/out' v0.1.0 | grep -qx channel=stable"
-check "promoted packages carry the release version" test -e "$d/out/unbound-compositor_0.1.0_arm64.deb"
-check "no package keeps the main version" sh -c "! ls '$d/out' | grep -q 'git20261029'"
-check "exact dependencies follow the promotion" sh -c "dpkg-deb -f '$d/out/unbound-desktop_0.1.0_all.deb' Depends | grep -q 'unbound-compositor (= 0.1.0)'"
+d=$(case_dir); desktop_debs "$d"; api "$d" desktop
+check "a green desktop run feeds main" sh -c "'$root/scripts/fetch-run.sh' desktop 7 '$d/out' | grep -qx component=main"
+check "it brings both architectures" test -e "$d/out/unbound-compositor_${desktop_version}_amd64.deb" -a \
+    -e "$d/out/unbound-compositor_${desktop_version}_arm64.deb"
+check "it brings the architecture-independent packages" test -e "$d/out/unbound-desktop_${desktop_version}_all.deb"
 check "repository packages keep their own version" test -e "$d/out/unbound-apt-source_1.0_all.deb"
-check "promotion keeps the installed files" sh -c "
-    a=\$(mktemp -d); b=\$(mktemp -d)
-    dpkg-deb -x '$d/debs/unbound-compositor_${main_version}_arm64.deb' \$a
-    dpkg-deb -x '$d/out/unbound-compositor_0.1.0_arm64.deb' \$b
-    diff -r \$a \$b"
+d=$(case_dir); kernel_debs "$d"; api "$d" kernel
+check "a green kernel run feeds apple" sh -c "'$root/scripts/fetch-run.sh' kernel 7 '$d/out' | grep -qx component=apple"
+check "it brings the kernel" test -e "$d/out/linux-image-${kernel_abi}_${kernel_version}_arm64.deb"
+for e in schedule workflow_dispatch; do
+    d=$(case_dir); kernel_debs "$d"; event=$e api "$d" kernel
+    check "a $e run is taken" fetch kernel "$d/out"
+done
+d=$(case_dir); desktop_debs "$d"; status=in_progress api "$d" desktop
+(sleep 2; jq '.status = "completed" | .conclusion = "success"' "$d/repos/unbound-linux/desktop/actions/runs/7/index.html" \
+    > "$d/run" && mv "$d/run" "$d/repos/unbound-linux/desktop/actions/runs/7/index.html") &
+check "a run still finishing is waited for" env FETCH_RUN_WAIT=20 "$root/scripts/fetch-run.sh" desktop 7 "$d/out"
+wait
 
-d=$(case_dir); api "$d" main push "$main_version" "" ahead 0.1.1
-check "an annotated tag is followed to its commit" fetch "$d/out" v0.1.1
-d=$(case_dir); api "$d" main push "$main_version" "" ahead 0.1.0 "$other"
-refuses "a tag on another commit is refused" "points at" fetch "$d/out" v0.1.0
-d=$(case_dir); api "$d" main push "$main_version" "" ahead 0.2.0
-refuses "a tag that disagrees with Cargo.toml is refused" "Cargo.toml at" fetch "$d/out" v0.1.0
-d=$(case_dir); api "$d" main push "$main_version"
-refuses "a tag that is not vX.Y.Z is refused" "not a vX.Y.Z tag" fetch "$d/out" v0.1
-d=$(case_dir); api "$d" v0.1.0 workflow_dispatch 0.1.0
-check "a rebuild on the tag feeds stable as built" sh -c "'$root/scripts/fetch-run.sh' 7 '$d/out' v0.1.0 | grep -qx version=0.1.0"
-d=$(case_dir); api "$d" v0.1.0 workflow_dispatch 0.1.1
-refuses "a rebuild on the tag with another version is refused" "built version" fetch "$d/out" v0.1.0
+d=$(case_dir); desktop_debs "$d"; api "$d" desktop
+refuses "an unknown repository is refused" "unknown repository" fetch images "$d/out"
+d=$(case_dir); desktop_debs "$d"; workflow=ci.yml api "$d" desktop
+refuses "another workflow is refused" "not .github/workflows/release.yml" fetch desktop "$d/out"
+d=$(case_dir); desktop_debs "$d"; api "$d" kernel
+refuses "the desktop's packages are refused from the kernel" "kernel does not publish" fetch kernel "$d/out"
+d=$(case_dir); desktop_debs "$d"; ref=feature api "$d" desktop
+refuses "a branch run is refused" "the archive takes main" fetch desktop "$d/out"
+d=$(case_dir); desktop_debs "$d"; event=pull_request api "$d" desktop
+refuses "a pull request run is refused" "started by pull_request" fetch desktop "$d/out"
+d=$(case_dir); desktop_debs "$d"; conclusion=failure api "$d" desktop
+refuses "a failed run is refused" "ended in failure" fetch desktop "$d/out"
+d=$(case_dir); desktop_debs "$d"; status=in_progress api "$d" desktop
+refuses "a run that does not finish is refused" "still in_progress" env FETCH_RUN_WAIT=1 \
+    "$root/scripts/fetch-run.sh" desktop 7 "$d/out"
+d=$(case_dir); desktop_debs "$d"; compare=diverged api "$d" desktop
+refuses "a commit off main is refused" "is not on main" fetch desktop "$d/out"
+d=$(case_dir); desktop_debs "$d" 0.0.0+git20261029.35.0000000; api "$d" desktop
+refuses "a version naming another commit is refused" "carries version" fetch desktop "$d/out"
+d=$(case_dir); kernel_debs "$d" 7.2.12-1; api "$d" kernel
+refuses "a kernel without the +unbound suffix is refused" "carries version" fetch kernel "$d/out"
+d=$(case_dir); desktop_debs "$d"; make_deb "$d/art/arm64" libc6 9.9 arm64; api "$d" desktop
+refuses "a package outside the archive's names is refused" "desktop does not publish" fetch desktop "$d/out"
+d=$(case_dir); desktop_debs "$d"; rm -r "$d/art/amd64"; api "$d" desktop
+refuses "a missing architecture is refused" "no single unbound-debs-amd64" fetch desktop "$d/out"
+d=$(case_dir); desktop_debs "$d"; rm "$d/art/amd64/xdg-desktop-portal-unbound_"*; api "$d" desktop
+refuses "an incomplete architecture is refused" "incomplete architecture" fetch desktop "$d/out"
+d=$(case_dir); desktop_debs "$d"; mv "$d/art/amd64/xdg-desktop-portal-unbound_"* "$d/art/arm64/"; api "$d" desktop
+refuses "a package in another architecture's artifact is refused" "unbound-debs-arm64 holds xdg-desktop-portal-unbound for amd64" \
+    fetch desktop "$d/out"
 
 finish

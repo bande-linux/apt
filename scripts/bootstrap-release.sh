@@ -6,7 +6,7 @@
 set -euo pipefail
 
 dir=$1
-packages=(unbound-archive-keyring unbound-apt-source unbound-apt-source-testing)
+packages=(unbound-archive-keyring unbound-apt-source)
 fail() { echo "bootstrap-release: $*" >&2; exit 1; }
 
 version=''
@@ -33,5 +33,5 @@ if gh release view "$tag" > /dev/null 2>&1; then
     exit 0
 fi
 gh release create "$tag" "${assets[@]}" --latest --title "Repository packages $version" --notes \
-    "Install the keyring and one channel package to add the Unbound repository; see https://unbound-linux.github.io/apt"
+    "Install both packages to add the Unbound repository; see https://unbound-linux.github.io/apt"
 echo "bootstrap-release: created $tag"

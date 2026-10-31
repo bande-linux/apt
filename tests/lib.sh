@@ -2,7 +2,6 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-host_arch=$(dpkg --print-architecture)
 scratch=$(mktemp -d)
 trap 'xargs -r kill < "$scratch/servers" 2>/dev/null || true; rm -rf "$scratch"' EXIT
 : > "$scratch/servers"
@@ -48,8 +47,7 @@ make_conf() {
     export GNUPGHOME=$conf/gnupg
     mkdir -p "$GNUPGHOME"
     chmod 700 "$GNUPGHOME"
-    cp "$root"/conf/{options,channels} "$conf/"
-    sed "s/^Architectures: .*/Architectures: $host_arch/" "$root/conf/distributions" > "$conf/distributions"
+    cp "$root"/conf/{options,distributions} "$conf/"
     gpg --batch --quiet --passphrase '' --quick-generate-key 'Unbound test archive key' ed25519 cert never
     primary=$(gpg --with-colons --list-keys | awk -F: '/^fpr/ { print $10; exit }')
     gpg --batch --quiet --passphrase '' --quick-add-key "$primary" ed25519 sign "$expiry"
