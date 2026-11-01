@@ -72,8 +72,8 @@ make_deb() {
     local dir=$1 package=$2 version=$3 arch=$4 extra=${5:-} tree
     tree=$(mktemp -d -p "$scratch")
     mkdir -p "$tree/DEBIAN" "$tree/usr/share/doc/$package"
-    printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: Test <test@example.org>\nSection: misc\nPriority: optional\nDescription: test package\n' \
-        "$package" "$version" "$arch" > "$tree/DEBIAN/control"
+    printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: Test <test@example.org>\nSection: misc\nPriority: optional\n%bDescription: test package\n' \
+        "$package" "$version" "$arch" "${recommends:+Recommends: $recommends\n}" > "$tree/DEBIAN/control"
     printf '%s %s %s\n' "$package" "$version" "$extra" > "$tree/usr/share/doc/$package/stamp"
     mkdir -p "$dir"
     dpkg-deb --root-owner-group -b "$tree" "$dir/${package}_${version}_${arch}.deb" > /dev/null

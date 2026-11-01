@@ -293,6 +293,16 @@ jobs:
           [ "$status" = 124 ]
           grep -q '^WAYLAND_DISPLAY=wayland-' compositor.out
 
+      - name: Check every package bande-desktop recommends has a candidate here or in Debian
+        if: needs.build.outputs.desktop != ''
+        run: |
+          missing=$(apt-cache show --no-all-versions bande-desktop | sed -n 's/^Recommends: //p' | tr ',' '\n' |
+            sed 's/^ *//; s/[ (|].*//' | while read -r package; do
+              candidate=$(apt-cache policy "$package" | sed -n 's/^ *Candidate: //p')
+              [ -n "$candidate" ] && [ "$candidate" != "(none)" ] || echo "$package"
+            done | xargs)
+          [ -z "$missing" ] || echo "::warning::bande-desktop recommends packages that neither the archive nor Debian testing has: $missing"
+
   report:
     needs: [build, deploy]
     if: needs.build.outputs.refused != ''

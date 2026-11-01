@@ -14,7 +14,7 @@ One suite, `rolling`, for Debian testing:
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
 | `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande` |
-| `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>` |
+| `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`: Terminal, Software and the Package Installer (recommended by `bande-desktop`), Mail, Calendar |
 | `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` that built a kernel | `linux-*-apple-*`, `bande-os-apple` |
 
 Each package keeps its newest version only, as in Debian's own suites. Kernel packages carry
@@ -129,7 +129,9 @@ No state is kept between runs: the live site is the source of truth.
   from the live archive, and updates through the source they install. When the archive
   carries a desktop, it waits until the site serves the version the build job put in, installs
   `bande-desktop`, checks that every installed `bande-*` package is built for the machine's
-  architecture (or `all`) at that version, and starts the installed compositor headless.
+  architecture (or `all`) at that version, and starts the installed compositor headless. It
+  warns about any package `bande-desktop` recommends that neither the archive nor Debian testing
+  has, such as a default app from `bande-linux/apps` that has not been released yet.
 
 ## First publish
 

@@ -152,6 +152,14 @@ for arch in amd64 arm64; do make_deb "$scratch/in-apps-old" bande-weather 0.1.0+
 check "an older app is skipped" rebuild --live "$apps_live" --add-each apps:main="$scratch/in-apps-old" --out "$scratch/apps-old"
 check "the newer app stays" both "$scratch/apps-old" main "bande-weather=$a1"
 check "a publish without apps keeps the processed runs" sh -c "'$root/scripts/rebuild.sh' --conf '$conf' --live '$apps_live' --add desktop:main='$scratch/in-4' --out '$scratch/apps-desktop' > /dev/null && grep -qx 'apps 502' '$scratch/apps-desktop/state/processed'"
+d6=0.0.0+git20261101.6.fffffff
+make_deb "$scratch/in-recommending" bande-compositor "$d6" amd64
+make_deb "$scratch/in-recommending" bande-compositor "$d6" arm64
+recommends=bande-weather make_deb "$scratch/in-recommending" bande-desktop "$d6" all
+check "a desktop that recommends an app is taken" rebuild --live "$apps_live" --add desktop:main="$scratch/in-recommending" --out "$scratch/recommending"
+check "the desktop recommends the app" sh -c "grep -A8 '^Package: bande-desktop' '$scratch/recommending/dists/rolling/main/binary-arm64/Packages' | grep -qx 'Recommends: bande-weather'"
+check "the app it recommends keeps its own version" both "$scratch/recommending" main "bande-weather=$a1"
+check "and stays the apps repository's" grep -qx 'bande-weather apps' "$scratch/recommending/state/owners"
 for arch in amd64 arm64; do make_deb "$scratch/in-apps-taken" bande-compositor 9.0.0+git20261101.9.ccccccc $arch; done
 refuses "an app may not take a desktop package" "bande-compositor is published from desktop, not apps" \
     rebuild --live "$apps_live" --add-each apps:main="$scratch/in-apps-taken" --out "$scratch/apps-taken"
