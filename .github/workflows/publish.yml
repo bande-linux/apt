@@ -1,4 +1,5 @@
 name: publish
+run-name: "${{ github.event_name == 'schedule' && 'Scheduled: look for new releases to publish' || (inputs.run_id != '' && format('Publish {0} run {1}', inputs.repo, inputs.run_id) || 'Look for new releases to publish') }}"
 
 on:
   schedule:
@@ -73,8 +74,13 @@ jobs:
           if [ -s runs ]; then
             cat runs
             echo "runs=$(paste -sd, runs)" >> "$GITHUB_OUTPUT"
+            echo "### Publishing" >> "$GITHUB_STEP_SUMMARY"
+            while read -r repo id; do
+              ref=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/bande-linux/$repo/actions/runs/$id" | jq -r '.head_branch // "?"') || ref='?'
+              echo "- $repo $ref (run $id)" >> "$GITHUB_STEP_SUMMARY"
+            done < runs
           else
-            echo "Nothing new to publish"
+            echo "Nothing new to publish" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
   build:
