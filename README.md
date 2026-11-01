@@ -14,7 +14,7 @@ One suite, `rolling`, for Debian testing:
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
 | `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande` |
-| `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`: Terminal, Software and the Package Installer (recommended by `bande-desktop`), Mail, Calendar |
+| `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`: Terminal, Software, the Package Installer and Activity Monitor (recommended by `bande-desktop`), Mail, Calendar |
 | `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` that built a kernel | `linux-*-apple-*`, `bande-os-apple` |
 
 Each package keeps its newest version only, as in Debian's own suites. Kernel packages carry
@@ -76,8 +76,7 @@ same releases.
      desktop push to `main` is refused;
    - a kernel run must be a `schedule` or `workflow_dispatch` run on `main`;
    - an apps run must be the `push` of an `<app>-vX.Y.Z` tag that points at the run's commit,
-     for an `apps/<app>` at that commit; dispatch runs are test builds and branch runs, such as
-     the `ci-test` run of `bande-template`, are never published;
+     for an `apps/<app>` at that commit; dispatch runs are test builds and are never published;
    - its commit must be on `main`.
 
    It then downloads the `bande-debs-ARCH` artifacts. The desktop uploads `amd64`, `arm64`
@@ -116,8 +115,8 @@ same releases.
 
 No state is kept between runs: the live site is the source of truth.
 
-- **Access:** `github.token` with `actions: read` and `contents: read`; `desktop` and `kernel`
-  are public, so no other token or GitHub App is involved.
+- **Access:** `github.token` with `actions: read` and `contents: read`; `desktop`, `kernel` and
+  `apps` are public, so no other token or GitHub App is involved.
 - **Signing:** the signing subkey is a secret of the `apt-publish` environment, which only `main`
   can use.
 - **Deploy:** the site is deployed with `actions/deploy-pages`.
@@ -169,6 +168,6 @@ tests/run-all.sh
 ```
 
 The tests build throwaway keys and packages for amd64 and arm64, serve sites and a fake GitHub
-API over local HTTP, and check finding new releases, both source repositories, publishing to both components, the
+API over local HTTP, and check finding new releases, every source repository, publishing to both components, the
 kernel limit, tampering and forged signatures. They also check rotation, and that apt itself
 updates from and downloads out of the result, without touching the machine's own apt state.
