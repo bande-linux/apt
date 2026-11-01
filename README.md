@@ -84,7 +84,7 @@ same releases.
    and `all`, the kernel `arm64`, and apps `amd64` and `arm64`. It refuses:
    - package names outside the repository's list; for apps, exactly `bande-<app>` of the tag,
      and never a name of the desktop's (its `packaging/`
-     directories, `bande-desktop`, `bande-os`, `xdg-desktop-portal-bande`, the repository
+     directories, `bande-desktop`, `xdg-desktop-portal-bande`, the repository
      packages);
    - a package filed under another architecture's artifact;
    - versions other than the run's: exactly the tag's `X.Y.Z` for the desktop, and for the
