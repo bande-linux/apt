@@ -155,7 +155,7 @@ own. For up to ten minutes after a publish it can serve a new `InRelease` beside
   client holding an `InRelease` from an earlier publish still finds its indexes. Pages cannot
   list a directory and every publish builds the site afresh, so the site lists the by-hash files
   with their times in `state/by-hash`, and the next publish restores them from the live site
-  before apt-ftparchive prunes. A site without by-hash files has its indexes taken by name.
+  before apt-ftparchive prunes.
 - Files a publish replaces (`InRelease`, `key.asc`, `state/*`) are read with
   [`scripts/fetch-fresh.sh`](scripts/fetch-fresh.sh). The CDN ignores the query string, so
   `?nonce` does not get past it, but it keys on the literal path, which Pages decodes: the

@@ -113,11 +113,9 @@ fresh() {
     esac
 }
 
-# live_index PATH SHA256 OUT: an index of the live Release, by hash; a site
-# published before by-hash has none, and serves it under PATH only.
+# live_index PATH SHA256 OUT: an index of the live Release, by hash.
 live_index() {
-    get "$live/dists/$suite/$(dirname "$1")/by-hash/SHA256/$2" "$3" ||
-        fresh "dists/$suite/$1" "$3" || fail "$suite/$1 is listed but missing"
+    get "$live/dists/$suite/$(dirname "$1")/by-hash/SHA256/$2" "$3" || fail "$suite/$1 is listed but missing"
     echo "$2  $3" | sha256sum -c --quiet - || fail "$suite/$1 does not match Release"
 }
 
@@ -277,23 +275,16 @@ while read -r c package arch version path; do
 done < "$work/chosen"
 reprepro --silent -b "$work/repo" export
 
-# The earlier generations' by-hash files: those state/by-hash lists, and those
-# of the live Release, as "MTIME PATH [INDEX]", where PATH is under
-# dists/$suite and INDEX names the file the live Release lists. apt-ftparchive
-# keeps the newest by mtime, so a file state/by-hash lists keeps its exact time
-# there; the Release Date, whole seconds, is only for a site without that list,
-# since two quick publishes would tie on it.
+# The earlier generations' by-hash files, as state/by-hash lists them: "MTIME
+# PATH", where PATH is under dists/$suite. apt-ftparchive keeps the newest by
+# mtime, so each keeps its exact time there, since two quick publishes would
+# tie on the whole-second Release Date.
 public=$work/repo/public/dists/$suite
 : > "$work/by-hash"
 if [ -e "$dist/Release" ]; then
-    fresh state/by-hash "$work/by-hash" || : > "$work/by-hash"
-    date=$(date -d "$(sed -n 's/^Date: //p' "$dist/Release")" +%s)
-    awk -v d="$date" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 ~ "/" && $3 !~ "/Release$" {
-        dir = $3; sub("/[^/]*$", "", dir); print d, dir "/by-hash/SHA256/" $1, $3
-    }' "$dist/Release" >> "$work/by-hash"
+    fresh state/by-hash "$work/by-hash" || fail "the live site lists no state/by-hash"
 fi
-awk '!($2 in t) { t[$2] = $1 } $3 != "" { i[$2] = $3 } END { for (p in t) print t[p], p, i[p] }' "$work/by-hash" |
-    sort -k2,2 | while read -r mtime path index; do
+sort -k2,2 -u "$work/by-hash" | while read -r mtime path; do
     [[ $mtime =~ ^[0-9]+(\.[0-9]+)?$ && $path =~ ^([a-z0-9-]+/)+by-hash/SHA256/([0-9a-f]{64})$ ]] ||
         fail "state/by-hash lists $mtime $path"
     sha=${path##*/} dest=$public/$path
@@ -301,11 +292,9 @@ awk '!($2 in t) { t[$2] = $1 } $3 != "" { i[$2] = $3 } END { for (p in t) print 
     [ -d "$public/${path%/by-hash/*}" ] || continue
     mkdir -p "$(dirname "$dest")"
     if ! get "$live/dists/$suite/$path" "$dest"; then
-        if [ -z "$index" ] || ! fresh "dists/$suite/$index" "$dest"; then
-            echo "rebuild: $suite/$path is gone from the live site; not keeping it"
-            rm -f "$dest"
-            continue
-        fi
+        echo "rebuild: $suite/$path is gone from the live site; not keeping it"
+        rm -f "$dest"
+        continue
     fi
     echo "$sha  $dest" | sha256sum -c --quiet - || fail "$suite/$path does not match its name"
     touch -d "@$mtime" "$dest"

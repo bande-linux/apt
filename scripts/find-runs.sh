@@ -90,9 +90,7 @@ live_version() {
     [ -e "$work/Release" ] || return 0
     sha=$(awk -v p="$index" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 == p { print $1 }' "$work/Release")
     [ -n "$sha" ] || return 0
-    # A site published before by-hash serves the index under its name only.
     curl -fs --retry 3 -o "$work/index.xz" "$live/dists/rolling/$1/binary-$2/by-hash/SHA256/$sha" ||
-        [ "$("$here/fetch-fresh.sh" "$live" "dists/rolling/$index" "$work/index.xz")" = 200 ] ||
         fail "rolling/$index is listed but missing"
     echo "$sha  $work/index.xz" | sha256sum -c --quiet - || fail "rolling/$index does not match Release"
     xz -dc "$work/index.xz" | awk -v RS= -v p="$3" '$0 ~ "(^|\n)Package: " p "\n" {

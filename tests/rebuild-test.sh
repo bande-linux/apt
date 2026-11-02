@@ -223,18 +223,6 @@ check "the arm64 packages carry over" has "$scratch/grown" main arm64 "bande-com
 check "the new architecture starts empty" lacks "$scratch/grown" main amd64 "bande-compositor=$d1"
 check "the new component takes the kernel" has "$scratch/grown" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
 
-# A site published before by-hash: no by-hash files, no state/by-hash and no
-# Acquire-By-Hash, as the live site was until this change.
-old=$(mktemp -d -p "$scratch")
-cp -r "$site/." "$old/"
-find "$old/dists" -name by-hash -exec rm -r {} +
-rm "$old/state/by-hash" "$old/dists/rolling/InRelease"
-sed -i '/^Acquire-By-Hash:/d' "$old/dists/rolling/Release"
-gpg --homedir "$conf/gnupg" --batch --quiet --clearsign -o "$old/dists/rolling/InRelease" "$old/dists/rolling/Release"
-check "a site published before by-hash is taken" rebuild --live "$(serve "$old")" --add desktop:main="$scratch/in-4" --out "$scratch/from-old"
-check "its indexes are kept by hash" cmp "$old/dists/rolling/main/binary-arm64/Packages.xz" \
-    "$(by_hash "$old" main/binary-arm64/Packages.xz | sed "s|$old|$scratch/from-old|")"
-
 tampered=$(mktemp -d -p "$scratch")
 cp -r "$site/." "$tampered/"
 echo x >> "$tampered/pool/main/b/bande-desktop/bande-desktop_0.0.0+git20261030.4.bbbbbb4_all.deb"
