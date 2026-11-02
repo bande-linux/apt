@@ -13,6 +13,8 @@
 # - apps: per app, the green build.yml push of its highest <app>-vX.Y.Z tag,
 #   when X.Y.Z is newer than the live bande-<app>'s in main and the run is not
 #   in the live state/processed, which holds the runs already taken or refused.
+# InRelease and state/processed are read past the Pages CDN (fetch-fresh.sh),
+# and the indexes by hash, so a publish in progress cannot mix generations.
 # fetch-run.sh checks each printed run in full. Needs GH_TOKEN; both
 # repositories are public.
 set -euo pipefail
@@ -49,7 +51,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 gpg --batch --quiet --dearmor < "$conf/archive-key.asc" > "$work/keyring.gpg"
 
-code=$(curl -sS --retry 3 -o "$work/InRelease" -w '%{http_code}' "$live/dists/rolling/InRelease") ||
+code=$("$here/fetch-fresh.sh" "$live" dists/rolling/InRelease "$work/InRelease") ||
     fail "cannot fetch $live/dists/rolling/InRelease"
 case $code in
     200)
@@ -67,7 +69,10 @@ live_version() {
     [ -e "$work/Release" ] || return 0
     sha=$(awk -v p="$index" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 == p { print $1 }' "$work/Release")
     [ -n "$sha" ] || return 0
-    curl -fsS --retry 3 -o "$work/index.xz" "$live/dists/rolling/$index" || fail "rolling/$index is listed but missing"
+    # A site published before by-hash serves the index under its name only.
+    curl -fs --retry 3 -o "$work/index.xz" "$live/dists/rolling/$1/binary-$2/by-hash/SHA256/$sha" ||
+        [ "$("$here/fetch-fresh.sh" "$live" "dists/rolling/$index" "$work/index.xz")" = 200 ] ||
+        fail "rolling/$index is listed but missing"
     echo "$sha  $work/index.xz" | sha256sum -c --quiet - || fail "rolling/$index does not match Release"
     xz -dc "$work/index.xz" | awk -v RS= -v p="$3" '$0 ~ "(^|\n)Package: " p "\n" {
         for (i = 1; i <= NF; i++) if ($i == "Version:") print $(i + 1)
@@ -130,7 +135,7 @@ fi
 
 : > "$work/processed"
 if [ -e "$work/Release" ]; then
-    code=$(curl -sS --retry 3 -o "$work/processed" -w '%{http_code}' "$live/state/processed") ||
+    code=$("$here/fetch-fresh.sh" "$live" state/processed "$work/processed") ||
         fail "cannot fetch $live/state/processed"
     case $code in
         200) ;;

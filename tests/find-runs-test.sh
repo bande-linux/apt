@@ -145,6 +145,32 @@ check "new repository packages are found" sh -c "APT_VERSION=1.1 '$root/scripts/
 check "published repository packages are not" sh -c "APT_VERSION=1.0 '$root/scripts/find-runs.sh' '$live' '$conf' > '$d/out' && test ! -s '$d/out'"
 check "an empty site takes the repository packages" sh -c "APT_VERSION=1.0 '$root/scripts/find-runs.sh' '$(serve "$empty")' '$conf' | grep -qx 'apt 1.0'"
 
+# Right after a publish the Pages CDN can serve the new InRelease beside the
+# old Packages.xz; the index is read by hash, so it still resolves.
+for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop-2" $p 0.2.0 all; done
+"$root/scripts/rebuild.sh" --conf "$conf" --live "$live" --add desktop:main="$scratch/desktop-2" --out "$scratch/site-2" > /dev/null
+stale=$(mktemp -d -p "$scratch")
+cp -r "$scratch/site-2/." "$stale/"
+cp "$scratch/site/dists/rolling/main/binary-arm64/Packages.xz" "$stale/dists/rolling/main/binary-arm64/Packages.xz"
+d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" api "$d"
+check "a stale Packages.xz beside a new InRelease resolves by hash" find_runs "$d/out" "$(serve "$stale")"
+check "the published desktop is not found again" test ! -s "$d/out"
+
+cached=$(mktemp -d -p "$scratch")
+cat > "$cached/server.py" <<'PY2'
+import http.server, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200); self.send_header("Age", "120"); self.end_headers(); self.wfile.write(b"x")
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY2
+port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+python3 -I "$cached/server.py" "$port" &
+echo $! >> "$scratch/servers"
+sleep 0.5
+refuses "an InRelease the CDN answers from its cache is refused" "came from the CDN cache" find_runs "$d/out" "http://127.0.0.1:$port"
+
 forged=$scratch/forged
 (make_conf "$forged" && "$root/scripts/rebuild.sh" --conf "$forged" --live "$(serve "$empty")" \
     --add desktop:main="$scratch/desktop" --out "$scratch/forged-site") > /dev/null 2>&1

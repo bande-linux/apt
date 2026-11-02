@@ -12,6 +12,21 @@ listed() {
     [ -e "$packages" ] || { echo "$packages is missing" >&2; return 1; }
     grep -h '^Package:\|^Version:' "$packages" | paste - - | awk '{ print $2 "=" $4 }' | sort | tr '\n' ' '
 }
+# by_hash SITE PATH: the by-hash path of an index the site's Release lists.
+by_hash() {
+    local sha
+    sha=$(awk -v p="$2" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 == p { print $1 }' "$1/dists/rolling/Release")
+    echo "$1/dists/rolling/${2%/*}/by-hash/SHA256/$sha"
+}
+# stale SITE OLD: a copy of SITE that serves OLD's indexes under their names, as
+# the Pages CDN can for up to ten minutes after a publish.
+stale() {
+    local d
+    d=$(mktemp -d -p "$scratch")
+    cp -r "$1/." "$d/"
+    for f in "$2"/dists/rolling/*/binary-*/Packages*; do cp "$f" "$d/${f#"$2"/}"; done
+    echo "$d"
+}
 has() { [[ " $(listed "$1" "$2" "$3")" == *" $4 "* ]]; }
 lacks() { ! has "$@"; }
 both() { has "$1" "$2" amd64 "$3" && has "$1" "$2" arm64 "$3"; }
@@ -51,6 +66,9 @@ check "Release lists both components and architectures" sh -c \
     "grep -q '^Components: main apple' '$scratch/site-1/dists/rolling/Release' && grep -q '^Architectures: amd64 arm64' '$scratch/site-1/dists/rolling/Release'"
 check "index carries the fingerprint" grep -q "$(gpg --with-colons --show-keys "$conf/archive-key.asc" | awk -F: '/^fpr/ { print $10; exit }')" "$scratch/site-1/index.html"
 check "key.asc is published" cmp "$conf/archive-key.asc" "$scratch/site-1/key.asc"
+check "Release sets Acquire-By-Hash" grep -qx 'Acquire-By-Hash: yes' "$scratch/site-1/dists/rolling/Release"
+check "every index is served by hash" cmp "$scratch/site-1/dists/rolling/main/binary-arm64/Packages.xz" \
+    "$(by_hash "$scratch/site-1" main/binary-arm64/Packages.xz)"
 
 kernel k1 7.2.12 7.2.12-1+bande1
 check "kernel publish" rebuild --live "$(serve "$scratch/site-1")" --add kernel:apple="$scratch/in-k1" --out "$scratch/site-k1"
@@ -70,6 +88,13 @@ check "main dropped the previous build" lacks "$site" main amd64 bande-composito
 check "dropped files leave the pool" test ! -e "$site/pool/main/b/bande-compositor/bande-compositor_${d1}_arm64.deb"
 check "repository packages survive rebuilds" has "$site" main arm64 bande-archive-keyring=1.0
 check "desktop publishes keep the kernel" has "$site" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
+check "the previous generations' indexes stay by hash" sh -c "cmp '$scratch/site-3/dists/rolling/main/binary-amd64/Packages.xz' \
+    '$(by_hash "$scratch/site-3" main/binary-amd64/Packages.xz | sed "s|site-3|site-4|")' &&
+    test -e '$(by_hash "$scratch/site-2" main/binary-amd64/Packages | sed "s|site-2|site-4|")'"
+check "state/by-hash lists them" grep -q " main/binary-amd64/by-hash/SHA256/$(basename "$(by_hash "$scratch/site-2" main/binary-amd64/Packages.gz)")\$" "$site/state/by-hash"
+check "a publish over a stale index still reads the live one by hash" \
+    rebuild --live "$(serve "$(stale "$site" "$scratch/site-3")")" --add desktop:main="$scratch/in-4" --out "$scratch/stale"
+check "and keeps the newest build" both "$scratch/stale" main bande-compositor=0.0.0+git20261030.4.bbbbbb4
 
 kernel k2 7.2.14 7.2.14-1+bande1
 check "a second kernel" rebuild --live "$(serve "$site")" --add kernel:apple="$scratch/in-k2" --out "$scratch/site-k2"
@@ -127,6 +152,7 @@ kernel k4 7.3.2 7.3.2-1+bande1
 check "one publish takes a desktop and a kernel" rebuild --live "$live" --add desktop:main="$scratch/in-5" --add kernel:apple="$scratch/in-k4" --out "$scratch/both"
 check "main takes the desktop" both "$scratch/both" main bande-compositor=0.0.0+git20261031.5.eeeeeee
 check "apple takes the kernel" has "$scratch/both" apple arm64 linux-image-7.3.2-apple-arm64-16k=7.3.2-1+bande1
+check "the oldest generation's indexes leave by hash" test ! -e "$(by_hash "$scratch/site-1" main/binary-amd64/Packages.xz | sed "s|site-1|both|")"
 check "the kernel limit holds across both" lacks "$scratch/both" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+bande1
 refuses "every batch is checked" "built by apt itself, not kernel" \
     rebuild --live "$live" --add desktop:main="$scratch/in-5" --add kernel:apple="$scratch/in-misplaced" --out "$scratch/both-bad"
@@ -184,6 +210,18 @@ check "the arm64 packages carry over" has "$scratch/grown" main arm64 "bande-com
 check "the new architecture starts empty" lacks "$scratch/grown" main amd64 "bande-compositor=$d1"
 check "the new component takes the kernel" has "$scratch/grown" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
 
+# A site published before by-hash: no by-hash files, no state/by-hash and no
+# Acquire-By-Hash, as the live site was until this change.
+old=$(mktemp -d -p "$scratch")
+cp -r "$site/." "$old/"
+find "$old/dists" -name by-hash -exec rm -r {} +
+rm "$old/state/by-hash" "$old/dists/rolling/InRelease"
+sed -i '/^Acquire-By-Hash:/d' "$old/dists/rolling/Release"
+gpg --homedir "$conf/gnupg" --batch --quiet --clearsign -o "$old/dists/rolling/InRelease" "$old/dists/rolling/Release"
+check "a site published before by-hash is taken" rebuild --live "$(serve "$old")" --add desktop:main="$scratch/in-4" --out "$scratch/from-old"
+check "its indexes are kept by hash" cmp "$old/dists/rolling/main/binary-arm64/Packages.xz" \
+    "$(by_hash "$old" main/binary-arm64/Packages.xz | sed "s|$old|$scratch/from-old|")"
+
 tampered=$(mktemp -d -p "$scratch")
 cp -r "$site/." "$tampered/"
 echo x >> "$tampered/pool/main/b/bande-desktop/bande-desktop_0.0.0+git20261030.4.bbbbbb4_all.deb"
@@ -202,6 +240,12 @@ refuses "an index signed by another key is refused" "not signed by the archive k
 
 big=$(mktemp -d -p "$scratch")
 cp -r "$site/." "$big/"
+mv "$(by_hash "$big" main/binary-arm64/Packages.xz)" "$scratch/moved"
+refuses "an index missing by hash is refused" "is not served by hash" "$root/scripts/check-site.sh" "$big" "$conf/keyring.gpg"
+mv "$scratch/moved" "$(by_hash "$big" main/binary-arm64/Packages.xz)"
+echo x > "$big/dists/rolling/main/binary-arm64/by-hash/SHA256/$(printf '0%.0s' $(seq 64))"
+refuses "a by-hash file that does not match its name is refused" "does not match its name" "$root/scripts/check-site.sh" "$big" "$conf/keyring.gpg"
+rm "$big/dists/rolling/main/binary-arm64/by-hash/SHA256/$(printf '0%.0s' $(seq 64))"
 truncate -s 96M "$big/pool/huge.deb"
 refuses "an unlisted pool file is refused" "not listed" "$root/scripts/check-site.sh" "$big" "$conf/keyring.gpg"
 rm "$big/pool/huge.deb"
@@ -228,9 +272,10 @@ Dir::Cache::Archives "$lists/archives";
 Dir::State::status "$lists/status";
 Debug::NoLocking "true";
 EOF
+# Served with the plain indexes of a publish ago: apt reads them by hash.
 cat > "$lists/sources.d/bande.sources" <<EOF
 Types: deb
-URIs: $(serve "$site")
+URIs: $(serve "$(stale "$site" "$scratch/site-3")")
 Suites: rolling
 Components: main apple
 Signed-By: $lists/keyring.gpg

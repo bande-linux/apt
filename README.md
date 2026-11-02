@@ -50,7 +50,8 @@ need no publish step and no token for apt: they only upload their artifacts, and
 public repositories with its own `github.token`. Its only secret is `APT_SIGNING_KEY`.
 
 0. [`scripts/find-runs.sh`](scripts/find-runs.sh) looks for runs newer than the live archive,
-   whose signature it checks. A source repository that does not exist yet, or has no green run,
+   whose signature it checks; it reads the live site as described in
+   [Pages caching](#pages-caching). A source repository that does not exist yet, or has no green run,
    is nothing new:
    - apt: repository packages of a version newer than the live `bande-archive-keyring`;
    - desktop: the green `release.yml` push of the highest `vX.Y.Z` tag, against the version of
@@ -111,12 +112,38 @@ same releases.
    - for apps, each package stands alone: one whose version is already published, or older, is
      skipped and the published one kept;
    - it refuses a name that `state/owners` gives to another source;
-   - it signs with every key in [`conf/signing-keys`](conf/signing-keys).
+   - reprepro builds the pool and the `Packages` indexes; `apt-ftparchive release` writes
+     `Release` with SHA256 sums and `Acquire-By-Hash: yes`, and copies every index to
+     `by-hash/SHA256/<sha256>` beside it (see [Pages caching](#pages-caching));
+   - it signs `Release` as `InRelease` and `Release.gpg` with every key in
+     [`conf/signing-keys`](conf/signing-keys).
 3. [`scripts/check-site.sh`](scripts/check-site.sh) checks the result before deploying:
-   signatures, checksums, no unlisted pool files, no file over 95 MB, and the site under 800 MB
+   signatures, checksums, `Acquire-By-Hash` with every index served by hash and every by-hash
+   file matching its name, no unlisted pool files, no file over 95 MB, and the site under 800 MB
    (a warning over 600 MB).
 
 No state is kept between runs: the live site is the source of truth.
+
+## Pages caching
+
+Pages serves every file with `cache-control: max-age=600`, and its CDN caches each file on its
+own. For up to ten minutes after a publish it can serve a new `InRelease` beside an old
+`Packages.xz`, or the other way round. The archive therefore follows Debian's by-hash layout:
+
+- `Release` carries `Acquire-By-Hash: yes`, and every index is also served at
+  `dists/rolling/<component>/binary-<arch>/by-hash/SHA256/<sha256>`. That path never changes
+  content, so apt (and `find-runs.sh` and `rebuild.sh`) always get the index that the
+  `InRelease` they hold names.
+- apt-ftparchive keeps the newest 3 generations (`By-Hash-Keep`) in each by-hash directory, so a
+  client holding an `InRelease` from an earlier publish still finds its indexes. Pages cannot
+  list a directory and every publish builds the site afresh, so the site lists the by-hash files
+  with their times in `state/by-hash`, and the next publish restores them from the live site
+  before apt-ftparchive prunes. A site without by-hash files has its indexes taken by name.
+- Files a publish replaces (`InRelease`, `key.asc`, `state/*`) are read with
+  [`scripts/fetch-fresh.sh`](scripts/fetch-fresh.sh). The CDN ignores the query string, so
+  `?nonce` does not get past it, but it keys on the literal path, which Pages decodes: the
+  script percent-encodes a random set of the path's letters (never the `/apt` site root, which
+  Pages routes before decoding) and refuses an answer with an `Age` above 0.
 
 - **Access:** `github.token` with `actions: read` and `contents: read`; `desktop`, `kernel` and
   `apps` are public, so no other token or GitHub App is involved.
@@ -172,5 +199,6 @@ tests/run-all.sh
 
 The tests build throwaway keys and packages for amd64 and arm64, serve sites and a fake GitHub
 API over local HTTP, and check finding new releases, every source repository, publishing to both components, the
-kernel limit, tampering and forged signatures. They also check rotation, and that apt itself
+kernel limit, tampering and forged signatures, and a stale `Packages.xz` beside a new
+`InRelease`, which both the scripts and apt resolve by hash. They also check rotation, and that apt itself
 updates from and downloads out of the result, without touching the machine's own apt state.

@@ -1,7 +1,9 @@
 #!/bin/bash
 # Usage: check-site.sh SITE KEYRING
 # Fails unless every index is signed by KEYRING, every listed file exists with
-# its checksum, every pool file is listed, and the site fits GitHub Pages.
+# its checksum, every index is also served by hash (Acquire-By-Hash), every
+# by-hash file matches its name, every pool file is listed, and the site fits
+# GitHub Pages.
 set -euo pipefail
 
 site=$1 keyring=$2
@@ -22,7 +24,15 @@ for inrelease in "$site"/dists/*/InRelease; do
         while read -r sha path; do
             [ -e "$dist/$path" ] || fail "$dist/$path is listed in Release but missing"
             echo "$sha  $dist/$path" | sha256sum -c --quiet - || fail "$dist/$path does not match Release"
+            # apt fetches every index but the components' Release files.
+            [[ $path == */* && $path != */Release ]] || continue
+            [ -e "$dist/${path%/*}/by-hash/SHA256/$sha" ] || fail "$dist/$path is not served by hash"
         done
+    grep -qx 'Acquire-By-Hash: yes' "$work/Release" || fail "$inrelease does not set Acquire-By-Hash: yes"
+    find "$dist" -path '*/by-hash/*' -type f | while read -r file; do
+        [[ $file == */by-hash/SHA256/* ]] || fail "$file is not a SHA256 by-hash file"
+        echo "${file##*/}  $file" | sha256sum -c --quiet - 2>/dev/null || fail "$file does not match its name"
+    done
     for packages in "$dist"/*/binary-*/Packages; do
         awk -v RS= '{
             for (i = 1; i <= NF; i++) { if ($i == "Filename:") f = $(i + 1); if ($i == "SHA256:") s = $(i + 1) }

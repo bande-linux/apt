@@ -236,14 +236,16 @@ jobs:
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends ca-certificates curl gpg
           gpg --batch --dearmor < conf/archive-key.asc > /tmp/archive.gpg
-          curl -fsSL https://bande-linux.github.io/apt/key.asc | gpg --batch --dearmor > /tmp/live.gpg
+          # Past the Pages CDN, which may still serve the previous key.asc.
+          [ "$(scripts/fetch-fresh.sh https://bande-linux.github.io/apt key.asc /tmp/live-key.asc)" = 200 ]
+          gpg --batch --dearmor < /tmp/live-key.asc > /tmp/live.gpg
           cmp /tmp/archive.gpg /tmp/live.gpg
           printf 'Types: deb\nURIs: https://bande-linux.github.io/apt\nSuites: rolling\nComponents: main\nSigned-By: /tmp/archive.gpg\n' \
             > /etc/apt/sources.list.d/bootstrap.sources
           for attempt in 1 2 3 4 5; do
             apt-get update -o APT::Update::Error-Mode=any && apt-get install -y bande-archive-keyring bande-apt-source && break
             [ "$attempt" != 5 ] || exit 1
-            echo "Pages may still serve the previous site; trying again in a minute"
+            echo "Pages may not serve this publish yet; trying again in a minute"
             sleep 60
           done
           rm /etc/apt/sources.list.d/bootstrap.sources

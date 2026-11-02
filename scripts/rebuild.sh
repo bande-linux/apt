@@ -18,6 +18,14 @@
 # of each source already taken (--processed adds to it), which find-runs.sh
 # reads.
 #
+# Release is written by apt-ftparchive, with Acquire-By-Hash: every index is
+# also published under by-hash/SHA256/<sha256>, which never changes, so a client
+# holding any InRelease the Pages CDN served finds the matching indexes.
+# apt-ftparchive keeps the last $by_hash_keep generations of them in each
+# directory; state/by-hash lists them, since Pages cannot list a directory, and
+# the next publish restores them from the live site. Mutable files (InRelease,
+# state) are read past the CDN with fetch-fresh.sh, indexes by hash.
+#
 # A site that serves neither dists/rolling/InRelease nor key.asc has never been
 # published, and the archive starts empty. One that serves key.asc but no
 # InRelease is refused, so a broken site is never published over.
@@ -31,6 +39,7 @@ repository_packages=" bande-archive-keyring bande-apt-source "
 # until it is dropped; keep_kernels bounds how many fit within the Pages limit.
 kernel_packages='linux-*-apple-*'
 keep_kernels=2
+by_hash_keep=3
 
 conf=$here/../conf
 site_template=$here/../site
@@ -89,6 +98,26 @@ get() {
     esac
 }
 
+# fresh PATH OUT: like get for $live/PATH, past the Pages CDN, for files a
+# publish replaces.
+fresh() {
+    local code
+    code=$("$here/fetch-fresh.sh" "$live" "$1" "$2") || fail "cannot fetch $live/$1"
+    case $code in
+        200) return 0 ;;
+        404) return 1 ;;
+        *) fail "$live/$1 answered HTTP $code" ;;
+    esac
+}
+
+# live_index PATH SHA256 OUT: an index of the live Release, by hash; a site
+# published before by-hash has none, and serves it under PATH only.
+live_index() {
+    get "$live/dists/$suite/$(dirname "$1")/by-hash/SHA256/$2" "$3" ||
+        fresh "dists/$suite/$1" "$3" || fail "$suite/$1 is listed but missing"
+    echo "$2  $3" | sha256sum -c --quiet - || fail "$suite/$1 does not match Release"
+}
+
 release_sha256() {
     awk -v p="$2" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 == p { print $1 }' "$1"
 }
@@ -112,7 +141,7 @@ describe() {
 : > "$work/rows"
 mkdir -p "$work/live/$suite"
 dist=$work/live/$suite
-if get "$live/dists/$suite/InRelease" "$dist/InRelease"; then
+if fresh "dists/$suite/InRelease" "$dist/InRelease"; then
     gpgv --quiet --keyring "$work/keyring.gpg" --output "$dist/Release" "$dist/InRelease" 2>/dev/null ||
         fail "$suite/InRelease is not signed by the archive key"
     for c in $components; do
@@ -124,8 +153,7 @@ if get "$live/dists/$suite/InRelease" "$dist/InRelease"; then
                 echo "rebuild: $suite/Release does not list $index yet; starting it empty"
                 continue
             fi
-            get "$live/dists/$suite/$index" "$dist/$c-$arch.xz" || fail "$suite/$index is listed but missing"
-            echo "$sha  $dist/$c-$arch.xz" | sha256sum -c --quiet - || fail "$suite/$index does not match Release"
+            live_index "$index" "$sha" "$dist/$c-$arch.xz"
             xz -dc "$dist/$c-$arch.xz" |
                 awk -v RS= '{
                     for (i = 1; i <= NF; i++) { if ($i == "Filename:") f = $(i + 1); if ($i == "SHA256:") s = $(i + 1) }
@@ -138,9 +166,9 @@ if get "$live/dists/$suite/InRelease" "$dist/InRelease"; then
         done
     done
     for state in owners processed; do
-        get "$live/state/$state" "$work/$state" || : > "$work/$state"
+        fresh "state/$state" "$work/$state" || : > "$work/$state"
     done
-elif get "$live/key.asc" "$work/live-key.asc"; then
+elif fresh key.asc "$work/live-key.asc"; then
     fail "$live serves key.asc but no dists/$suite/InRelease; refusing to start the archive over"
 else
     echo "rebuild: $live has never been published; starting the archive"
@@ -217,7 +245,7 @@ while read -r mode c package arch version deb; do
 done < "$work/new"
 
 mkdir -p "$work/repo/conf"
-sed "s/@SIGNING_KEYS@/$signing_keys/" "$conf/distributions" > "$work/repo/conf/distributions"
+cp "$conf/distributions" "$work/repo/conf/distributions"
 cp "$conf/options" "$work/repo/conf/options"
 awk '{ print $1, $2, $3 }' "$work/rows" | sort -u > "$work/groups"
 : > "$work/chosen"
@@ -246,6 +274,52 @@ while read -r c package arch version path; do
 done < "$work/chosen"
 reprepro --silent -b "$work/repo" export
 
+# The earlier generations' by-hash files: those state/by-hash lists, and those
+# of the live Release, as "MTIME PATH [INDEX]", where PATH is under
+# dists/$suite and INDEX names the file the live Release lists.
+public=$work/repo/public/dists/$suite
+: > "$work/by-hash"
+if [ -e "$dist/Release" ]; then
+    fresh state/by-hash "$work/by-hash" || : > "$work/by-hash"
+    date=$(date -d "$(sed -n 's/^Date: //p' "$dist/Release")" +%s)
+    awk -v d="$date" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 ~ "/" && $3 !~ "/Release$" {
+        dir = $3; sub("/[^/]*$", "", dir); print d, dir "/by-hash/SHA256/" $1, $3
+    }' "$dist/Release" >> "$work/by-hash"
+fi
+sort -k2,2 -k1,1gr "$work/by-hash" | awk '!seen[$2]++' | while read -r mtime path index; do
+    [[ $mtime =~ ^[0-9]+(\.[0-9]+)?$ && $path =~ ^([a-z0-9-]+/)+by-hash/SHA256/([0-9a-f]{64})$ ]] ||
+        fail "state/by-hash lists $mtime $path"
+    sha=${path##*/} dest=$public/$path
+    # A directory the archive no longer has keeps nothing.
+    [ -d "$public/${path%/by-hash/*}" ] || continue
+    mkdir -p "$(dirname "$dest")"
+    if ! get "$live/dists/$suite/$path" "$dest"; then
+        if [ -z "$index" ] || ! fresh "dists/$suite/$index" "$dest"; then
+            echo "rebuild: $suite/$path is gone from the live site; not keeping it"
+            rm -f "$dest"
+            continue
+        fi
+    fi
+    echo "$sha  $dest" | sha256sum -c --quiet - || fail "$suite/$path does not match its name"
+    touch -d "@$mtime" "$dest"
+done
+
+# Release, by apt-ftparchive: SHA256 sums, Acquire-By-Hash, and by-hash copies
+# of every index, keeping the newest $by_hash_keep generations in each directory.
+rm -f "$public/Release"
+release_options=()
+for f in Origin Label Suite Codename Architectures Components Description; do
+    release_options+=(-o "APT::FTPArchive::Release::$f=$(field "$f")")
+done
+(cd "$public" && apt-ftparchive "${release_options[@]}" -o APT::FTPArchive::DoByHash=true \
+    -o APT::FTPArchive::By-Hash-Keep="$by_hash_keep" -o APT::FTPArchive::MD5=false \
+    -o APT::FTPArchive::SHA1=false -o APT::FTPArchive::SHA512=false release . > "$work/Release")
+mv "$work/Release" "$public/Release"
+signers=()
+for key in $signing_keys; do signers+=(--local-user "$key"); done
+gpg --batch --yes --digest-algo SHA512 "${signers[@]}" --clearsign -o "$public/InRelease" "$public/Release"
+gpg --batch --yes --digest-algo SHA512 "${signers[@]}" --armor --detach-sign -o "$public/Release.gpg" "$public/Release"
+
 mkdir -p "$out"
 cp -r "$work/repo/public/." "$out/"
 cp "$conf/archive-key.asc" "$out/key.asc"
@@ -260,6 +334,7 @@ for entry in "${processed[@]}"; do
     tr , '\n' <<< "${entry#*=}" | sed "s/^/${entry%%=*} /" >> "$work/processed"
 done
 awk '!seen[$0]++' "$work/processed" | tail -n 2000 > "$out/state/processed"
+(cd "$public" && find . -path '*/by-hash/SHA256/*' -type f -printf '%T@ %P\n' | sort -k2) > "$out/state/by-hash"
 
 "$here/check-site.sh" "$out" "$work/keyring.gpg"
 echo "== $suite"
