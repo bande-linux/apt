@@ -115,6 +115,11 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           xargs apt-get install -y -qq --no-install-recommends < ci/packages
 
+      - name: Shellcheck, tests and the signing key's lifetime
+        run: |
+          tests/run-all.sh
+          scripts/check-key-expiry.sh conf
+
       - name: Build the keyring and source packages
         run: scripts/build-repository-packages.sh debs-apt
 

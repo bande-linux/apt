@@ -156,7 +156,7 @@ signs is decided by the secret subkey held in the `apt-publish` environment.
   Every index then carries both signatures, and clients holding either key accept it.
 
 [`scripts/check-key-expiry.sh`](scripts/check-key-expiry.sh) fails 120 days before the signing
-subkeys run out.
+subkeys run out. Every publish runs it, with the tests below, before it signs anything.
 
 ## Testing locally
 
