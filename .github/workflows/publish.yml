@@ -1,29 +1,11 @@
 name: publish
-run-name: "${{ inputs.title != '' && format('Publish {0}', inputs.title) || format('Publish {0} run {1}', inputs.repo, inputs.run_id) }}"
+run-name: "Publish ${{ github.event.client_payload.title }}"
 
+# Started only by "look for releases" (look.yml), through a repository_dispatch, which has no Run
+# workflow button.
 on:
-  workflow_dispatch:
-    inputs:
-      repo:
-        description: Repository of the run to publish (desktop, kernel or apps); "look for releases" finds new runs itself
-        required: false
-        type: string
-        default: ''
-      run_id:
-        description: Its release run (desktop release.yml on a vX.Y.Z tag, kernel follow-debian.yml, apps build.yml on an <app>-vX.Y.Z tag)
-        required: false
-        type: string
-        default: ''
-      runs:
-        description: Set by "look for releases"; comma-separated "REPO RUN_ID" pairs
-        required: false
-        type: string
-        default: ''
-      title:
-        description: Set by "look for releases"; what the runs are, for the run name
-        required: false
-        type: string
-        default: ''
+  repository_dispatch:
+    types: [publish]
 
 permissions: {}
 
@@ -66,18 +48,13 @@ jobs:
         id: find
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ inputs.repo }}
-          RUN_ID: ${{ inputs.run_id }}
-          RUNS: ${{ inputs.runs }}
+          RUNS: ${{ github.event.client_payload.runs }}
         run: |
-          if [ -n "$RUNS" ]; then
-            tr , '\n' <<< "$RUNS" > runs
-          elif [ -n "$REPO" ] && [ -n "$RUN_ID" ]; then
-            echo "$REPO $RUN_ID" > runs
-          else
-            echo "::error::give repo and run_id together; \"look for releases\" finds new runs itself"
+          if [ -z "$RUNS" ]; then
+            echo "::error::the dispatch names no runs"
             exit 1
           fi
+          tr , '\n' <<< "$RUNS" > runs
           cat runs
           echo "runs=$(paste -sd, runs)" >> "$GITHUB_OUTPUT"
           echo "### Publishing" >> "$GITHUB_STEP_SUMMARY"

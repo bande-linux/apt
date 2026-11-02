@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       actions: write
-      contents: read
+      contents: write
     steps:
       - name: Install git, so the checkout carries the history
         run: |
@@ -62,7 +62,9 @@ jobs:
             fi
           done < runs
           title=$(IFS=,; echo "${names[*]}" | sed 's/,/, /g')
-          gh workflow run publish.yml --ref main -f runs="$(paste -sd, runs)" -f title="$title"
+          jq -n --arg runs "$(paste -sd, runs)" --arg title "$title" \
+            '{event_type: "publish", client_payload: {runs: $runs, title: $title}}' |
+            gh api "repos/$GH_REPO/dispatches" --input -
           echo "Started a publish of $title" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Delete earlier looks

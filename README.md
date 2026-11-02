@@ -44,8 +44,8 @@ take a name the desktop publishes.
 ## How a publish works
 
 [`look.yml`](.github/workflows/look.yml) ("look for releases") runs every 30 minutes and from its
-Run workflow button. When it finds something new it starts [`publish.yml`](.github/workflows/publish.yml),
-named after what it publishes, and deletes its own earlier green runs. The source repositories
+Run workflow button. When it finds something new it starts [`publish.yml`](.github/workflows/publish.yml)
+through a repository dispatch (publish has no button of its own), named after what it publishes, and deletes its own earlier green runs. The source repositories
 need no publish step and no token for apt: they only upload their artifacts, and apt reads the
 public repositories with its own `github.token`. Its only secret is `APT_SIGNING_KEY`.
 
@@ -67,9 +67,9 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    `apt-publish` environment. Releases of several repositories found together go out in one
    publish.
 
-A dispatch with `repo` and `run_id` publishes that run instead of searching. Publishes share
+Publishes share
 the `pages` concurrency group, so they run one at a time. GitHub keeps only the newest pending
-run of a group and cancels the one it replaces; that loses nothing, since the next run finds the
+run of a group and cancels the one it replaces; that loses nothing, since the next look finds the
 same releases.
 
 1. [`scripts/fetch-run.sh`](scripts/fetch-run.sh) checks the run:
