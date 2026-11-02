@@ -1,0 +1,71 @@
+name: look for releases
+run-name: "${{ github.event_name == 'schedule' && 'Scheduled look for new releases' || 'Look for new releases' }}"
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: look
+  cancel-in-progress: false
+
+jobs:
+  look:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Install git, so the checkout carries the history
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends ca-certificates git gh
+
+      - name: Check out (actions/checkout v7)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Install the tools
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          xargs apt-get install -y -qq --no-install-recommends < ci/packages
+
+      - name: Find runs newer than the live archive and start a publish for them
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          APT_VERSION=$(scripts/build-repository-packages.sh --version) \
+            scripts/find-runs.sh https://bande-linux.github.io/apt > runs
+          if [ ! -s runs ]; then
+            echo "Nothing new to publish" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cat runs
+          names=()
+          while read -r repo id; do
+            if [ "$repo" = apt ]; then
+              names+=("apt $id")
+            else
+              ref=$(gh api "repos/bande-linux/$repo/actions/runs/$id" --jq '.head_branch // "?"') || ref='?'
+              names+=("$repo $ref")
+            fi
+          done < runs
+          title=$(IFS=,; echo "${names[*]}" | sed 's/,/, /g')
+          gh workflow run publish.yml --ref main -f runs="$(paste -sd, runs)" -f title="$title"
+          echo "Started a publish of $title" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete earlier looks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/tidy-runs.sh "${{ github.repository }}" look.yml "${{ github.run_id }}"

@@ -43,7 +43,9 @@ take a name the desktop publishes.
 
 ## How a publish works
 
-[`publish.yml`](.github/workflows/publish.yml) runs every 30 minutes. The source repositories
+[`look.yml`](.github/workflows/look.yml) ("look for releases") runs every 30 minutes and from its
+Run workflow button. When it finds something new it starts [`publish.yml`](.github/workflows/publish.yml),
+named after what it publishes, and deletes its own earlier green runs. The source repositories
 need no publish step and no token for apt: they only upload their artifacts, and apt reads the
 public repositories with its own `github.token`. Its only secret is `APT_SIGNING_KEY`.
 
