@@ -153,6 +153,19 @@ check "one publish takes a desktop and a kernel" rebuild --live "$live" --add de
 check "main takes the desktop" both "$scratch/both" main bande-compositor=0.0.0+git20261031.5.eeeeeee
 check "apple takes the kernel" has "$scratch/both" apple arm64 linux-image-7.3.2-apple-arm64-16k=7.3.2-1+bande1
 check "the oldest generation's indexes leave by hash" test ! -e "$(by_hash "$scratch/site-1" main/binary-amd64/Packages.xz | sed "s|site-1|both|")"
+# apt-ftparchive keeps the newest by-hash files by mtime. The live Release's Date
+# has whole seconds, so two quick publishes tie on it; the exact times in
+# state/by-hash must win, even when the Date is later (here, every listed file
+# is 100 seconds older than written).
+early=$(mktemp -d -p "$scratch")
+cp -r "$site/." "$early/"
+live_xz=main/binary-amd64/by-hash/SHA256/$(basename "$(by_hash "$site" main/binary-amd64/Packages.xz)")
+awk '{ $1 -= 100; print }' "$site/state/by-hash" > "$early/state/by-hash"
+check "a publish over it" rebuild --live "$(serve "$early")" --add desktop:main="$scratch/in-5" --out "$scratch/early-out"
+# shellcheck disable=SC2016 # an awk program
+check "the by-hash files keep the exact times state/by-hash lists" awk -v p="$live_xz" '
+    FNR == 1 { n++ } $2 == p { t[n] = $1 } END { exit !(t[1] != "" && t[1] - t[2] < 0.001 && t[2] - t[1] < 0.001) }' \
+    "$early/state/by-hash" "$scratch/early-out/state/by-hash"
 check "the kernel limit holds across both" lacks "$scratch/both" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+bande1
 refuses "every batch is checked" "built by apt itself, not kernel" \
     rebuild --live "$live" --add desktop:main="$scratch/in-5" --add kernel:apple="$scratch/in-misplaced" --out "$scratch/both-bad"

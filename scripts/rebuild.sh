@@ -279,7 +279,10 @@ reprepro --silent -b "$work/repo" export
 
 # The earlier generations' by-hash files: those state/by-hash lists, and those
 # of the live Release, as "MTIME PATH [INDEX]", where PATH is under
-# dists/$suite and INDEX names the file the live Release lists.
+# dists/$suite and INDEX names the file the live Release lists. apt-ftparchive
+# keeps the newest by mtime, so a file state/by-hash lists keeps its exact time
+# there; the Release Date, whole seconds, is only for a site without that list,
+# since two quick publishes would tie on it.
 public=$work/repo/public/dists/$suite
 : > "$work/by-hash"
 if [ -e "$dist/Release" ]; then
@@ -289,7 +292,8 @@ if [ -e "$dist/Release" ]; then
         dir = $3; sub("/[^/]*$", "", dir); print d, dir "/by-hash/SHA256/" $1, $3
     }' "$dist/Release" >> "$work/by-hash"
 fi
-sort -k2,2 -k1,1gr "$work/by-hash" | awk '!seen[$2]++' | while read -r mtime path index; do
+awk '!($2 in t) { t[$2] = $1 } $3 != "" { i[$2] = $3 } END { for (p in t) print t[p], p, i[p] }' "$work/by-hash" |
+    sort -k2,2 | while read -r mtime path index; do
     [[ $mtime =~ ^[0-9]+(\.[0-9]+)?$ && $path =~ ^([a-z0-9-]+/)+by-hash/SHA256/([0-9a-f]{64})$ ]] ||
         fail "state/by-hash lists $mtime $path"
     sha=${path##*/} dest=$public/$path
