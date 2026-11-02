@@ -13,7 +13,7 @@ One suite, `rolling`, for Debian testing:
 
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
-| `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande` |
+| `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
 | `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`: Terminal, Software, the Package Installer and Activity Monitor (recommended by `bande-desktop`), Mail, Calendar |
 | `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` that built a kernel | `linux-*-apple-*`, `bande-os-apple` |
 
@@ -25,7 +25,7 @@ limit.
 ## The repository packages
 
 `bande-archive-keyring` (the keys of [`conf/archive-key.asc`](conf/archive-key.asc) and an APT
-pin that lets the archive provide only `bande-*`, `xdg-desktop-portal-bande` and
+pin that lets the archive provide only `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` and
 `linux-*-apple-*`) and `bande-apt-source` (`rolling main`; its postinst adds `apple` in
 `bande-apple.sources` on Apple Silicon) are built by this repository,
 from [`packaging/`](packaging), with

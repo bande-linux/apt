@@ -27,7 +27,7 @@ poll=${FETCH_RUN_POLL:-15}
 repository_packages=" bande-archive-keyring bande-apt-source "
 # Names the desktop and the kernel publish, which an app may never take; the
 # desktop's packaging/ directories are added from its main branch.
-reserved=" xdg-desktop-portal-bande bande-desktop bande-os-apple "
+reserved=" xdg-desktop-portal-bande libpam-bande-secrets bande-desktop bande-os-apple "
 fail() { echo "fetch-run: $*" >&2; exit 1; }
 
 # Per repository: its workflow, the events it publishes from, the package names
@@ -37,7 +37,7 @@ case $source_repo in
     desktop)
         workflow=.github/workflows/release.yml
         events=(push)
-        names=('bande-*' xdg-desktop-portal-bande)
+        names=('bande-*' xdg-desktop-portal-bande libpam-bande-secrets)
         component=main
         architectures=(amd64 arm64 all)
         ;;

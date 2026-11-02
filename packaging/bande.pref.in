@@ -2,6 +2,6 @@ Package: *
 Pin: origin @ARCHIVE_HOST@
 Pin-Priority: -1
 
-Package: bande-* xdg-desktop-portal-bande linux-*-apple-*
+Package: bande-* xdg-desktop-portal-bande libpam-bande-secrets linux-*-apple-*
 Pin: origin @ARCHIVE_HOST@
 Pin-Priority: 500

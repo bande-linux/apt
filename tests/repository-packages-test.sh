@@ -44,7 +44,7 @@ check "apt reads the pin" sh -c "$(declare -f policy); scratch='$scratch'; polic
 mkdir -p "$scratch/broken"
 printf 'Package: *\nPin: origin x\nPin-Priority: high\n' > "$scratch/broken/broken.pref"
 check "a broken pin would show" sh -c "$(declare -f policy); scratch='$scratch'; policy '$scratch/broken' | grep -q '^[EW]:'"
-check "the pin lets the archive provide the kernel" grep -qx 'Package: bande-\* xdg-desktop-portal-bande linux-\*-apple-\*' "$scratch/apt/preferences.d/bande.pref"
+check "the pin lets the archive provide the kernel" grep -qx 'Package: bande-\* xdg-desktop-portal-bande libpam-bande-secrets linux-\*-apple-\*' "$scratch/apt/preferences.d/bande.pref"
 check "a version can be given" sh -c "REPOSITORY_VERSION=9.9 '$root/scripts/build-repository-packages.sh' '$scratch/c' > /dev/null && test -e '$scratch/c/bande-apt-source_9.9_all.deb'"
 shallow=$scratch/shallow
 git clone -q --depth 1 "file://$root" "$shallow" 2> /dev/null
