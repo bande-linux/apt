@@ -26,7 +26,8 @@ limit.
 
 `bande-archive-keyring` (the keys of [`conf/archive-key.asc`](conf/archive-key.asc) and an APT
 pin that lets the archive provide only `bande-*`, `xdg-desktop-portal-bande` and
-`linux-*-apple-*`) and `bande-apt-source` (`rolling main apple`) are built by this repository,
+`linux-*-apple-*`) and `bande-apt-source` (`rolling main`; its postinst adds `apple` in
+`bande-apple.sources` on Apple Silicon) are built by this repository,
 from [`packaging/`](packaging), with
 [`scripts/build-repository-packages.sh`](scripts/build-repository-packages.sh). No source
 repository may publish them, so the archive depends on none of them.

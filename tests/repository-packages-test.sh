@@ -16,9 +16,16 @@ check "the same commit builds the same keyring" cmp "$scratch/a/bande-archive-ke
 check "and the same source package" cmp "$scratch/a/bande-apt-source_${version}_all.deb" "$scratch/b/bande-apt-source_${version}_all.deb"
 check "the keyring holds the archive keys" cmp <(gpg --batch --dearmor < "$root/conf/archive-key.asc") \
     <(file a bande-archive-keyring "$version" usr/share/keyrings/bande-archive-keyring.pgp)
-check "the source follows rolling main apple" sh -c "$(declare -f file); scratch='$scratch'
+check "the source follows rolling main only" sh -c "$(declare -f file); scratch='$scratch'
     file a bande-apt-source '$version' etc/apt/sources.list.d/bande.sources | grep -qx 'Suites: rolling' &&
-    file a bande-apt-source '$version' etc/apt/sources.list.d/bande.sources | grep -qx 'Components: main apple'"
+    file a bande-apt-source '$version' etc/apt/sources.list.d/bande.sources | grep -qx 'Components: main'"
+check "it carries the apple source outside /etc" sh -c "$(declare -f file); scratch='$scratch'
+    file a bande-apt-source '$version' usr/share/bande-apt-source/bande-apple.sources | grep -qx 'Components: apple' &&
+    file a bande-apt-source '$version' usr/share/bande-apt-source/bande-apple.sources | grep -qx 'Signed-By: /usr/share/keyrings/bande-archive-keyring.pgp'"
+check "its postinst and postrm are executable and the postinst reads the device tree" sh -c "
+    dpkg-deb --ctrl-tarfile '$scratch/a/bande-apt-source_${version}_all.deb' | tar -tvf - | grep -E '^-rwxr-xr-x .* \\./postinst$' &&
+    dpkg-deb --ctrl-tarfile '$scratch/a/bande-apt-source_${version}_all.deb' | tar -tvf - | grep -E '^-rwxr-xr-x .* \\./postrm$' &&
+    dpkg-deb --ctrl-tarfile '$scratch/a/bande-apt-source_${version}_all.deb' | tar -xO ./postinst | grep -qF /proc/device-tree/compatible"
 check "the source trusts only the keyring" sh -c "$(declare -f file); scratch='$scratch'
     file a bande-apt-source '$version' etc/apt/sources.list.d/bande.sources | grep -qx 'Signed-By: /usr/share/keyrings/bande-archive-keyring.pgp'"
 check "the source depends on the keyring" sh -c "dpkg-deb -f '$scratch/a/bande-apt-source_${version}_all.deb' Depends | grep -qx bande-archive-keyring"

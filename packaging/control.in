@@ -19,4 +19,7 @@ Section: misc
 Priority: optional
 Description: Bande APT repository
  Makes APT follow the rolling suite of the Bande APT repository for Debian
- testing: the desktop and apps (main) and the Mac mini kernel (apple).
+ testing: the desktop and apps (main). On Apple Silicon it also enables the
+ Mac mini kernel (apple), in /etc/apt/sources.list.d/bande-apple.sources;
+ copy /usr/share/bande-apt-source/bande-apple.sources there to enable it
+ elsewhere, and delete it to turn it off.

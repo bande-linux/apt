@@ -3,7 +3,8 @@
 #        build-repository-packages.sh --version
 # Builds bande-archive-keyring (the keys in conf/archive-key.asc and an APT pin
 # that lets the archive provide only Bande's packages) and bande-apt-source
-# (the rolling source) from packaging/ into OUT_DIR. Their version is
+# (the rolling main source, and the apple source its postinst enables on Apple
+# Silicon) from packaging/ into OUT_DIR. Their version is
 # 1.<commits that touched packaging/, the keys or this script>, so it rises
 # with every change, and the same commit builds the same packages.
 # $REPOSITORY_VERSION overrides the version.
@@ -40,8 +41,8 @@ substitute() {
         -e "s|@VERSION@|$version|g" "$1"
 }
 
-# package NAME: the tree under $work/NAME gets its control paragraph, conffiles
-# and copyright, then is built with fixed owners, modes and times.
+# package NAME: the tree under $work/NAME gets its control paragraph, conffiles,
+# maintainer scripts and copyright, then is built with fixed owners, modes and times.
 package() {
     local name=$1 tree=$work/$1
     mkdir -p "$tree/DEBIAN" "$tree/usr/share/doc/$name"
@@ -53,6 +54,9 @@ package() {
     cp "$root/packaging/copyright" "$tree/usr/share/doc/$name/copyright"
     find "$tree" -type d -exec chmod 0755 {} +
     find "$tree" -type f -exec chmod 0644 {} +
+    for script in postinst postrm; do
+        [ ! -e "$root/packaging/$name.$script" ] || install -m 0755 "$root/packaging/$name.$script" "$tree/DEBIAN/$script"
+    done
     find "$tree" -exec touch -h -d "@$epoch" {} +
     mkdir -p "$out"
     SOURCE_DATE_EPOCH=$epoch dpkg-deb --root-owner-group -Zxz --build "$tree" "$out/${name}_${version}_all.deb" > /dev/null
@@ -64,6 +68,7 @@ gpg --batch --quiet --dearmor < "$root/conf/archive-key.asc" > "$work/bande-arch
 substitute "$root/packaging/bande.pref.in" > "$work/bande-archive-keyring/etc/apt/preferences.d/bande.pref"
 package bande-archive-keyring
 
-mkdir -p "$work/bande-apt-source/etc/apt/sources.list.d"
+mkdir -p "$work/bande-apt-source/etc/apt/sources.list.d" "$work/bande-apt-source/usr/share/bande-apt-source"
 substitute "$root/packaging/bande.sources.in" > "$work/bande-apt-source/etc/apt/sources.list.d/bande.sources"
+substitute "$root/packaging/bande-apple.sources.in" > "$work/bande-apt-source/usr/share/bande-apt-source/bande-apple.sources"
 package bande-apt-source

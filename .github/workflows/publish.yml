@@ -263,7 +263,7 @@ jobs:
           done
           rm /etc/apt/sources.list.d/bootstrap.sources
           apt-get update -o APT::Update::Error-Mode=any
-          apt-cache policy bande-archive-keyring bande-os-apple
+          apt-cache policy bande-archive-keyring
 
       - name: Install the desktop just published and check it is this architecture's build
         if: needs.build.outputs.desktop != ''

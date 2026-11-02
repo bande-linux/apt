@@ -35,8 +35,10 @@ sudo apt install ./bande-archive-keyring.deb ./bande-apt-source.deb</code></pre>
 <pre><code>Types: deb
 URIs: https://bande-linux.github.io/apt
 Suites: rolling
-Components: main apple
+Components: main
 Signed-By: /usr/share/keyrings/bande-archive-keyring.pgp</code></pre>
+<p>On Apple Silicon it also adds <code>/etc/apt/sources.list.d/bande-apple.sources</code>, the
+same source with <code>Components: apple</code>.</p>
 <p>2. Install the desktop:</p>
 <pre><code>sudo apt update
 sudo apt install bande-desktop</code></pre>
@@ -49,7 +51,13 @@ arrive with <code>sudo apt upgrade</code>.</p>
 packages and the optional apps, each installed on its own with
 <code>sudo apt install bande-&lt;name&gt;</code>. <code>apple</code> (arm64) holds the Mac mini M2 kernel, built from Debian's kernel
 with the Apple patches, and <code>bande-os-apple</code>; it carries the newest two kernel
-versions.</p>
+versions. <code>bande-apt-source</code> enables it on Apple Silicon only. To enable it on
+another machine:</p>
+<pre><code>sudo cp /usr/share/bande-apt-source/bande-apple.sources /etc/apt/sources.list.d/
+sudo apt update</code></pre>
+<p>To turn it off (the Mac then gets no kernel updates):</p>
+<pre><code>sudo rm /etc/apt/sources.list.d/bande-apple.sources
+sudo apt update</code></pre>
 
 <h2>Remove</h2>
 <pre><code>sudo apt purge bande-apt-source bande-archive-keyring</code></pre>
