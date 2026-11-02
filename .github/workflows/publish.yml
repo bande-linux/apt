@@ -83,6 +83,23 @@ jobs:
             echo "Nothing new to publish" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
+  tidy:
+    needs: find
+    if: needs.find.outputs.runs == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Check out (actions/checkout v7)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Delete earlier runs that had nothing to publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/tidy-runs.sh "${{ github.repository }}" "${{ github.run_id }}"
+
   build:
     needs: find
     if: needs.find.outputs.runs != ''
