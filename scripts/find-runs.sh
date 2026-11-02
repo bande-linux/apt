@@ -13,6 +13,9 @@
 # - apps: per app, the green build.yml push of its highest <app>-vX.Y.Z tag,
 #   when X.Y.Z is newer than the live bande-<app>'s in main and the run is not
 #   in the live state/processed, which holds the runs already taken or refused.
+# - resign: "resign VALID_UNTIL" when the live InRelease has fewer than 7 days
+#   left before its Valid-Until, or none; an InRelease past it is refused, as
+#   apt would, since it may be an old one replayed.
 # InRelease and state/processed are read past the Pages CDN (fetch-fresh.sh),
 # and the indexes by hash, so a publish in progress cannot mix generations.
 # fetch-run.sh checks each printed run in full. Needs GH_TOKEN; both
@@ -57,6 +60,19 @@ case $code in
     200)
         gpgv --quiet --keyring "$work/keyring.gpg" --output "$work/Release" "$work/InRelease" 2>/dev/null ||
             fail "rolling/InRelease is not signed by the archive key"
+        until=$(sed -n 's/^Valid-Until: //p' "$work/Release")
+        if [ -z "$until" ]; then
+            echo "resign none"
+        else
+            seconds=$(date -d "$until" +%s) || fail "rolling/InRelease has an unreadable Valid-Until: $until"
+            left=$((seconds - $(date +%s)))
+            [ "$left" -gt 0 ] || fail "rolling/InRelease expired at $until"
+            if [ "$left" -lt $((7 * 86400)) ]; then
+                echo "resign $(date -u -d "@$seconds" +%Y-%m-%dT%H:%MZ)"
+            else
+                echo "find-runs: rolling/InRelease is valid until $until" >&2
+            fi
+        fi
         ;;
     404) echo "find-runs: $live serves no archive yet" >&2 ;;
     *) fail "$live/dists/rolling/InRelease answered HTTP $code" ;;

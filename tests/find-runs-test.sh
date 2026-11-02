@@ -156,6 +156,24 @@ d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" api "$d"
 check "a stale Packages.xz beside a new InRelease resolves by hash" find_runs "$d/out" "$(serve "$stale")"
 check "the published desktop is not found again" test ! -s "$d/out"
 
+# Valid-Until: under 7 days left, or none, starts a re-sign; a past one is
+# refused, since it may be an old InRelease replayed.
+d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" api "$d"
+check "a fresh InRelease is no re-sign" find_runs "$d/out"
+check "nothing is printed for it" test ! -s "$d/out"
+check "it says how long it is valid" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'rolling/InRelease is valid until'"
+expiring=$(mktemp -d -p "$scratch")
+cp -r "$scratch/site/." "$expiring/"
+set_valid_until "$expiring" "$conf" '+3 days'
+check "an InRelease expiring within 7 days starts a re-sign" find_runs "$d/out" "$(serve "$expiring")"
+check "a re-sign is printed for it" grep -qx 'resign [0-9T:-]*Z' "$d/out"
+check "and only that" test "$(wc -l < "$d/out")" = 1
+set_valid_until "$expiring" "$conf"
+check "an InRelease without Valid-Until is due a re-sign" find_runs "$d/out" "$(serve "$expiring")"
+check "it is printed as resign none" diff <(echo "resign none") "$d/out"
+set_valid_until "$expiring" "$conf" '-1 hour'
+refuses "an expired InRelease is refused" "rolling/InRelease expired at" find_runs "$d/out" "$(serve "$expiring")"
+
 cached=$(mktemp -d -p "$scratch")
 cat > "$cached/server.py" <<'PY2'
 import http.server, sys

@@ -40,7 +40,7 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           xargs apt-get install -y -qq --no-install-recommends < ci/packages
 
-      - name: Find runs newer than the live archive and start a publish for them
+      - name: Find runs newer than the live archive, or a Valid-Until near its end, and start a publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -54,14 +54,21 @@ jobs:
           cat runs
           names=()
           while read -r repo id; do
-            if [ "$repo" = apt ]; then
+            if [ "$repo" = resign ]; then
+              continue
+            elif [ "$repo" = apt ]; then
               names+=("apt $id")
             else
               ref=$(gh api "repos/bande-linux/$repo/actions/runs/$id" --jq '.head_branch // "?"') || ref='?'
               names+=("$repo $ref")
             fi
           done < runs
-          title=$(IFS=,; echo "${names[*]}" | sed 's/,/, /g')
+          # Only a Valid-Until near its end: the publish rebuilds and re-signs as it is.
+          if [ ${#names[@]} -eq 0 ]; then
+            title="Re-sign the archive"
+          else
+            title=$(IFS=,; echo "${names[*]}" | sed 's/,/, /g')
+          fi
           jq -n --arg runs "$(paste -sd, runs)" --arg title "$title" \
             '{event_type: "publish", client_payload: {runs: $runs, title: $title}}' |
             gh api "repos/$GH_REPO/dispatches" --input -

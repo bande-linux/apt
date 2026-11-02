@@ -91,3 +91,17 @@ serve() {
     done
     echo "http://127.0.0.1:$port"
 }
+
+# set_valid_until SITE CONF [DATE]: rewrites the Valid-Until of SITE's Release to
+# DATE (date -d syntax), or drops it without DATE, and signs it again with CONF's
+# keys, as a publish would have.
+set_valid_until() {
+    local dist=$1/dists/rolling conf=$2 signers=()
+    sed -i '/^Valid-Until: /d' "$dist/Release"
+    if [ $# -gt 2 ]; then
+        sed -i "/^Date: /a Valid-Until: $(LC_ALL=C date -u -d "$3" '+%a, %d %b %Y %H:%M:%S UTC')" "$dist/Release"
+    fi
+    while read -r key; do signers+=(--local-user "$key"); done < "$conf/signing-keys"
+    gpg --batch --yes --digest-algo SHA512 "${signers[@]}" --clearsign -o "$dist/InRelease" "$dist/Release"
+    gpg --batch --yes --digest-algo SHA512 "${signers[@]}" --armor --detach-sign -o "$dist/Release.gpg" "$dist/Release"
+}

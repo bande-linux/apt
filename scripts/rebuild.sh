@@ -40,6 +40,9 @@ repository_packages=" bande-archive-keyring bande-apt-source "
 kernel_packages='linux-*-apple-*'
 keep_kernels=2
 by_hash_keep=3
+# Valid-Until, as Debian's archives set it: apt refuses an InRelease past it, so
+# an old one cannot be replayed. look.yml re-signs once fewer than 7 days remain.
+valid_days=14
 
 conf=$here/../conf
 site_template=$here/../site
@@ -304,14 +307,16 @@ sort -k2,2 -k1,1gr "$work/by-hash" | awk '!seen[$2]++' | while read -r mtime pat
     touch -d "@$mtime" "$dest"
 done
 
-# Release, by apt-ftparchive: SHA256 sums, Acquire-By-Hash, and by-hash copies
-# of every index, keeping the newest $by_hash_keep generations in each directory.
+# Release, by apt-ftparchive: SHA256 sums, Acquire-By-Hash, Valid-Until
+# $valid_days days out, and by-hash copies of every index, keeping the newest
+# $by_hash_keep generations in each directory.
 rm -f "$public/Release"
 release_options=()
 for f in Origin Label Suite Codename Architectures Components Description; do
     release_options+=(-o "APT::FTPArchive::Release::$f=$(field "$f")")
 done
 (cd "$public" && apt-ftparchive "${release_options[@]}" -o APT::FTPArchive::DoByHash=true \
+    -o APT::FTPArchive::Release::ValidTime=$((valid_days * 86400)) \
     -o APT::FTPArchive::By-Hash-Keep="$by_hash_keep" -o APT::FTPArchive::MD5=false \
     -o APT::FTPArchive::SHA1=false -o APT::FTPArchive::SHA512=false release . > "$work/Release")
 mv "$work/Release" "$public/Release"

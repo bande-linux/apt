@@ -45,7 +45,9 @@ take a name the desktop publishes.
 
 [`look.yml`](.github/workflows/look.yml) ("look for releases") runs every 30 minutes and from its
 Run workflow button. When it finds something new it starts [`publish.yml`](.github/workflows/publish.yml)
-through a repository dispatch (publish has no button of its own), named after what it publishes, and deletes its own earlier green runs. The source repositories
+through a repository dispatch (publish has no button of its own), named after what it publishes, and deletes its own earlier green runs.
+It also starts one, named "Re-sign the archive", when the live `InRelease` has fewer than 7
+days left before its `Valid-Until`, or none (see [Valid-Until](#valid-until)). The source repositories
 need no publish step and no token for apt: they only upload their artifacts, and apt reads the
 public repositories with its own `github.token`. Its only secret is `APT_SIGNING_KEY`.
 
@@ -63,6 +65,9 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
      the version of `bande-<app>` in `main`, unless the live `state/processed` lists the run:
      the publish records every apps run it took or refused there, so a refused tag is not
      tried again until the app tags a newer version.
+
+   - resign: the live `InRelease`'s `Valid-Until` is less than 7 days out, or missing. An
+     `InRelease` past it is refused, as apt would.
 
    With nothing new the workflow stops there: no rebuild, no deploy, and no use of the
    `apt-publish` environment. Releases of several repositories found together go out in one
@@ -113,16 +118,33 @@ same releases.
      skipped and the published one kept;
    - it refuses a name that `state/owners` gives to another source;
    - reprepro builds the pool and the `Packages` indexes; `apt-ftparchive release` writes
-     `Release` with SHA256 sums and `Acquire-By-Hash: yes`, and copies every index to
+     `Release` with SHA256 sums, `Acquire-By-Hash: yes` and `Valid-Until` 14 days out, and copies every index to
      `by-hash/SHA256/<sha256>` beside it (see [Pages caching](#pages-caching));
    - it signs `Release` as `InRelease` and `Release.gpg` with every key in
      [`conf/signing-keys`](conf/signing-keys).
 3. [`scripts/check-site.sh`](scripts/check-site.sh) checks the result before deploying:
-   signatures, checksums, `Acquire-By-Hash` with every index served by hash and every by-hash
+   signatures, checksums, a `Valid-Until` in the future and at most 14 days out, `Acquire-By-Hash` with every index served by hash and every by-hash
    file matching its name, no unlisted pool files, no file over 95 MB, and the site under 800 MB
    (a warning over 600 MB).
 
 No state is kept between runs: the live site is the source of truth.
+
+## Valid-Until
+
+apt refuses an `InRelease` past its `Valid-Until`, so a mirror or attacker cannot keep serving an
+old, validly signed archive that hides newer packages. Debian's own suites and the security
+archive are valid for 7 days and re-signed every few hours; this archive changes less often, so
+it is valid for 14 days (`APT::FTPArchive::Release::ValidTime` in `rebuild.sh`) and look re-signs
+it once fewer than 7 days remain, about once a week. A re-sign is an ordinary publish with
+nothing new: it rebuilds, signs, keeps the by-hash generations and verifies as any other.
+If no publish succeeds for 7 days, the live `InRelease` expires; apt clients and look then refuse
+it. Once the cause is fixed, start the re-sign by hand (`rebuild.sh` still checks the expired
+`InRelease`'s signatures):
+
+```bash
+gh api repos/bande-linux/apt/dispatches -f event_type=publish \
+  -f 'client_payload[runs]=resign expired' -f 'client_payload[title]=Re-sign the archive'
+```
 
 ## Pages caching
 

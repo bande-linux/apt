@@ -2,14 +2,16 @@
 # Usage: check-site.sh SITE KEYRING
 # Fails unless every index is signed by KEYRING, every listed file exists with
 # its checksum, every index is also served by hash (Acquire-By-Hash), every
-# by-hash file matches its name, every pool file is listed, and the site fits
-# GitHub Pages.
+# by-hash file matches its name, every InRelease carries a Valid-Until in the
+# future and at most $valid_days days (and an hour) out, every pool file is
+# listed, and the site fits GitHub Pages.
 set -euo pipefail
 
 site=$1 keyring=$2
 max_total=$((800 * 1024 * 1024))
 warn_total=$((600 * 1024 * 1024))
 max_file=$((95 * 1024 * 1024))
+valid_days=14
 fail() { echo "check-site: $*" >&2; exit 1; }
 
 work=$(mktemp -d)
@@ -29,6 +31,12 @@ for inrelease in "$site"/dists/*/InRelease; do
             [ -e "$dist/${path%/*}/by-hash/SHA256/$sha" ] || fail "$dist/$path is not served by hash"
         done
     grep -qx 'Acquire-By-Hash: yes' "$work/Release" || fail "$inrelease does not set Acquire-By-Hash: yes"
+    until=$(sed -n 's/^Valid-Until: //p' "$work/Release")
+    [ -n "$until" ] || fail "$inrelease has no Valid-Until"
+    until=$(date -d "$until" +%s) || fail "$inrelease has an unreadable Valid-Until"
+    now=$(date +%s)
+    [ "$until" -gt "$now" ] || fail "$inrelease has a Valid-Until in the past"
+    [ "$until" -le $((now + valid_days * 86400 + 3600)) ] || fail "$inrelease is valid for more than $valid_days days"
     find "$dist" -path '*/by-hash/*' -type f | while read -r file; do
         [[ $file == */by-hash/SHA256/* ]] || fail "$file is not a SHA256 by-hash file"
         echo "${file##*/}  $file" | sha256sum -c --quiet - 2>/dev/null || fail "$file does not match its name"

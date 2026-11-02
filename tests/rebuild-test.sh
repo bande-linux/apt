@@ -258,6 +258,17 @@ rm "$big"/filler-*.bin
 for i in $(seq 7); do truncate -s 90M "$big/filler-$i.bin"; done
 check "a site over 600 MB passes with a warning" sh -c "'$root/scripts/check-site.sh' '$big' '$conf/keyring.gpg' 2>&1 | grep -q 'warning: site is'"
 
+rm "$big"/filler-*.bin
+check "the rebuilt Release is valid 14 days" sh -c "test \$((\$(date -d \"\$(sed -n 's/^Valid-Until: //p' '$site/dists/rolling/Release')\" +%s) - \$(date +%s))) -gt \$((14 * 86400 - 3600))"
+set_valid_until "$big" "$conf"
+refuses "an InRelease without Valid-Until is refused" "has no Valid-Until" "$root/scripts/check-site.sh" "$big" "$conf/keyring.gpg"
+set_valid_until "$big" "$conf" '-1 minute'
+refuses "an InRelease past its Valid-Until is refused" "Valid-Until in the past" "$root/scripts/check-site.sh" "$big" "$conf/keyring.gpg"
+set_valid_until "$big" "$conf" '+30 days'
+refuses "an InRelease valid for over 14 days is refused" "more than 14 days" "$root/scripts/check-site.sh" "$big" "$conf/keyring.gpg"
+set_valid_until "$big" "$conf" '+13 days'
+check "an InRelease valid for 13 days passes" "$root/scripts/check-site.sh" "$big" "$conf/keyring.gpg"
+
 lists=$scratch/apt
 mkdir -p "$lists/sources.d" "$lists/lists/partial" "$lists/archives/partial"
 : > "$lists/status"

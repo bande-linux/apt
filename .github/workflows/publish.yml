@@ -59,6 +59,10 @@ jobs:
           echo "runs=$(paste -sd, runs)" >> "$GITHUB_OUTPUT"
           echo "### Publishing" >> "$GITHUB_STEP_SUMMARY"
           while read -r repo id; do
+            if [ "$repo" = resign ]; then
+              echo "- a re-sign, Valid-Until $id" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
             ref=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/bande-linux/$repo/actions/runs/$id" | jq -r '.head_branch // "?"') || ref='?'
             echo "- $repo $ref (run $id)" >> "$GITHUB_STEP_SUMMARY"
           done < runs
@@ -111,7 +115,7 @@ jobs:
           : > refused
           apps=()
           while read -r repo run; do
-            [ "$repo" != apt ] || continue
+            [ "$repo" != apt ] && [ "$repo" != resign ] || continue
             if [ "$repo" = apps ]; then
               apps+=("$run")
               if ! env -u GITHUB_OUTPUT scripts/fetch-run.sh apps "$run" debs-apps < /dev/null; then
