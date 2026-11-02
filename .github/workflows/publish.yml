@@ -21,7 +21,7 @@ concurrency:
 jobs:
   find:
     runs-on: ubuntu-24.04
-    container: debian:trixie
+    container: debian:testing
     timeout-minutes: 10
     permissions:
       actions: read
@@ -71,7 +71,7 @@ jobs:
     needs: find
     if: needs.find.outputs.runs != ''
     runs-on: ubuntu-24.04
-    container: debian:trixie
+    container: debian:testing
     environment: apt-publish
     timeout-minutes: 45
     permissions:
@@ -181,7 +181,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-24.04
-    container: debian:trixie
+    container: debian:testing
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -196,7 +196,7 @@ jobs:
   release:
     needs: [build, deploy]
     runs-on: ubuntu-24.04
-    container: debian:trixie
+    container: debian:testing
     permissions:
       contents: write
     steps:

@@ -160,7 +160,12 @@ check "the oldest generation's indexes leave by hash" test ! -e "$(by_hash "$scr
 early=$(mktemp -d -p "$scratch")
 cp -r "$site/." "$early/"
 live_xz=main/binary-amd64/by-hash/SHA256/$(basename "$(by_hash "$site" main/binary-amd64/Packages.xz)")
-awk '{ $1 -= 100; print }' "$site/state/by-hash" > "$early/state/by-hash"
+# Shift the whole seconds only: awk would print the time through OFMT, which
+# mawk 1.3.4 20250131 renders as 1.79363e+09 and later mawk truncates.
+while read -r mtime path; do
+    seconds=${mtime%%.*}
+    echo "$((seconds - 100))${mtime#"$seconds"} $path"
+done < "$site/state/by-hash" > "$early/state/by-hash"
 check "a publish over it" rebuild --live "$(serve "$early")" --add desktop:main="$scratch/in-5" --out "$scratch/early-out"
 # shellcheck disable=SC2016 # an awk program
 check "the by-hash files keep the exact times state/by-hash lists" awk -v p="$live_xz" '

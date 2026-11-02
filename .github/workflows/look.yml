@@ -19,7 +19,7 @@ concurrency:
 jobs:
   look:
     runs-on: ubuntu-24.04
-    container: debian:trixie
+    container: debian:testing
     timeout-minutes: 10
     permissions:
       actions: write
