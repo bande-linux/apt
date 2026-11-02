@@ -55,6 +55,7 @@ jobs:
           names=()
           while read -r repo id; do
             if [ "$repo" = resign ]; then
+              [ "$id" != expired ] || echo "::warning::the live InRelease is past its Valid-Until; re-signing it"
               continue
             elif [ "$repo" = apt ]; then
               names+=("apt $id")

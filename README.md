@@ -66,8 +66,8 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
      the publish records every apps run it took or refused there, so a refused tag is not
      tried again until the app tags a newer version.
 
-   - resign: the live `InRelease`'s `Valid-Until` is less than 7 days out, or missing. An
-     `InRelease` past it is refused, as apt would.
+   - resign: the live `InRelease`'s `Valid-Until` is less than 7 days out, or missing. Past
+     it, only the re-sign is started.
 
    With nothing new the workflow stops there: no rebuild, no deploy, and no use of the
    `apt-publish` environment. Releases of several repositories found together go out in one
@@ -137,14 +137,9 @@ archive are valid for 7 days and re-signed every few hours; this archive changes
 it is valid for 14 days (`APT::FTPArchive::Release::ValidTime` in `rebuild.sh`) and look re-signs
 it once fewer than 7 days remain, about once a week. A re-sign is an ordinary publish with
 nothing new: it rebuilds, signs, keeps the by-hash generations and verifies as any other.
-If no publish succeeds for 7 days, the live `InRelease` expires; apt clients and look then refuse
-it. Once the cause is fixed, start the re-sign by hand (`rebuild.sh` still checks the expired
-`InRelease`'s signatures):
-
-```bash
-gh api repos/bande-linux/apt/dispatches -f event_type=publish \
-  -f 'client_payload[runs]=resign expired' -f 'client_payload[title]=Re-sign the archive'
-```
+If the re-signs keep failing until it passes, the live `InRelease` expires and apt clients refuse it. Look
+then takes no new runs from it, since an expired index could be a replay, logs a warning and
+starts "Re-sign the archive"; `rebuild.sh` still requires the archive key's signatures on it.
 
 ## Pages caching
 

@@ -14,8 +14,9 @@
 #   when X.Y.Z is newer than the live bande-<app>'s in main and the run is not
 #   in the live state/processed, which holds the runs already taken or refused.
 # - resign: "resign VALID_UNTIL" when the live InRelease has fewer than 7 days
-#   left before its Valid-Until, or none; an InRelease past it is refused, as
-#   apt would, since it may be an old one replayed.
+#   left before its Valid-Until, or none. An InRelease past it may be an old one
+#   replayed: it is no base for new runs, so only "resign expired" is printed,
+#   and the publish re-signs the archive from its verified signature.
 # InRelease and state/processed are read past the Pages CDN (fetch-fresh.sh),
 # and the indexes by hash, so a publish in progress cannot mix generations.
 # fetch-run.sh checks each printed run in full. Needs GH_TOKEN; both
@@ -66,7 +67,11 @@ case $code in
         else
             seconds=$(date -d "$until" +%s) || fail "rolling/InRelease has an unreadable Valid-Until: $until"
             left=$((seconds - $(date +%s)))
-            [ "$left" -gt 0 ] || fail "rolling/InRelease expired at $until"
+            if [ "$left" -le 0 ]; then
+                echo "find-runs: warning: rolling/InRelease expired at $until; re-signing it, no new runs taken" >&2
+                echo "resign expired"
+                exit 0
+            fi
             if [ "$left" -lt $((7 * 86400)) ]; then
                 echo "resign $(date -u -d "@$seconds" +%Y-%m-%dT%H:%MZ)"
             else

@@ -172,7 +172,10 @@ set_valid_until "$expiring" "$conf"
 check "an InRelease without Valid-Until is due a re-sign" find_runs "$d/out" "$(serve "$expiring")"
 check "it is printed as resign none" diff <(echo "resign none") "$d/out"
 set_valid_until "$expiring" "$conf" '-1 hour'
-refuses "an expired InRelease is refused" "rolling/InRelease expired at" find_runs "$d/out" "$(serve "$expiring")"
+d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" api "$d"
+check "an expired InRelease starts a re-sign" find_runs "$d/out" "$(serve "$expiring")"
+check "and no new run is taken from it" diff <(echo "resign expired") "$d/out"
+check "it warns" sh -c "'$root/scripts/find-runs.sh' '$(serve "$expiring")' '$conf' 2>&1 | grep -q 'warning: rolling/InRelease expired at'"
 
 cached=$(mktemp -d -p "$scratch")
 cat > "$cached/server.py" <<'PY2'
