@@ -60,6 +60,24 @@ api() {
             '.workflow_runs += [{id: $i, event: $e, head_branch: $t, conclusion: $c}]' \
             "$base/apps/actions/workflows/build.yml/runs" > "$d/x" && mv "$d/x" "$base/apps/actions/workflows/build.yml/runs"
     done
+    local repo runs tags tag
+    for repo in desktop apps; do
+        runs=${l10n_runs:-} tags=${desktop_tags:-}
+        [ "$repo" = desktop ] || runs=${apps_l10n_runs:-} tags=${apps_tags:-}
+        mkdir -p "$base/$repo/actions/workflows/l10n.yml" "$base/$repo/git/matching-refs/tags" "$base/$repo/compare"
+        echo '{"workflow_runs": []}' > "$base/$repo/actions/workflows/l10n.yml/runs"
+        for run in $runs; do
+            IFS=: read -r id tag conclusion <<< "$run"
+            jq --argjson i "$id" --arg t "$tag" --arg c "$conclusion" \
+                '.workflow_runs += [{id: $i, event: "push", head_branch: $t, head_sha: "cafe", conclusion: $c}]' \
+                "$base/$repo/actions/workflows/l10n.yml/runs" > "$d/x" && mv "$d/x" "$base/$repo/actions/workflows/l10n.yml/runs"
+        done
+        tr ' ' '\n' <<< "$tags l10n-20261101" | grep . | jq -R '{ref: ("refs/tags/" + .)}' | jq -s . > "$base/$repo/git/matching-refs/tags/index.html"
+        for tag in $tags; do
+            if [[ " ${on_history:-} " == *" $tag "* ]]; then status=ahead; else status=behind; fi
+            jq -n --arg s "$status" '{status: $s}' > "$base/$repo/compare/$tag...cafe"
+        done
+    done
     export GITHUB_API_URL
     GITHUB_API_URL=$(serve "$d")
 }
@@ -101,6 +119,44 @@ check "both are printed for it" diff <(printf 'desktop 30\nkernel 40\n') "$d/out
 d=$(mktemp -d -p "$scratch"); dict_runs="81:dict-20261108:success 80:dict-20261101:success 82:dict-2026:success 83:dict-20261201:failure" api "$d"
 check "the highest green dictionary tag is found" find_runs "$d/out"
 check "only that dictionary run is printed" diff <(echo "dict 81") "$d/out"
+
+d=$(mktemp -d -p "$scratch")
+l10n_runs="90:l10n-20261108:success 91:l10n-20261107:success 92:l10n-2026:success 93:l10n-20261109:failure" \
+    desktop_tags="v0.1.0" on_history="v0.1.0" api "$d"
+check "the desktop's highest green language pack tag is found" find_runs "$d/out"
+check "only that run is printed" diff <(echo "l10n 90") "$d/out"
+d=$(mktemp -d -p "$scratch"); l10n_runs="90:l10n-20261108:success 94:l10n-20261108.1:success" desktop_tags="v0.1.0" api "$d"
+check "a second tag of a day is newer" find_runs "$d/out"
+check "and printed" diff <(echo "l10n 94") "$d/out"
+d=$(mktemp -d -p "$scratch"); l10n_runs="90:l10n-20261108:success" desktop_tags="v0.1.0 v0.2.0" on_history="v0.1.0 v0.2.0" api "$d"
+check "packs built on a release not published yet wait" find_runs "$d/out"
+check "nothing is printed for them" test ! -s "$d/out"
+check "it says what they wait for" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'l10n-20261108 of the desktop (run 90) wait for v0.2.0'"
+d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" l10n_runs="90:l10n-20261108:success" desktop_tags="v0.1.0 v0.2.0" \
+    on_history="v0.1.0 v0.2.0" api "$d"
+check "they go with that release when it is published" find_runs "$d/out"
+check "both are printed" diff <(printf 'desktop 31\nl10n 90\n') "$d/out"
+d=$(mktemp -d -p "$scratch"); l10n_runs="90:l10n-20261108:success" desktop_tags="v0.1.0 v0.2.0" on_history="v0.1.0" api "$d"
+check "a newer release after the packs' commit does not hold them" find_runs "$d/out"
+check "they are printed" diff <(echo "l10n 90") "$d/out"
+"$root/scripts/rebuild.sh" --conf "$conf" --live "$live" --processed l10n=90,77 --processed apps-l10n=95 --out "$scratch/site-l10n" > /dev/null
+d=$(mktemp -d -p "$scratch"); l10n_runs="90:l10n-20261108:success" apps_l10n_runs="95:l10n-20261108:success" desktop_tags="v0.1.0" \
+    on_history="v0.1.0" api "$d"
+check "taken language pack runs are not taken again" find_runs "$d/out" "$(serve "$scratch/site-l10n")"
+check "nothing is printed for them" test ! -s "$d/out"
+d=$(mktemp -d -p "$scratch"); apps_l10n_runs="95:l10n-20261108:success" apps_tags="weather-v0.1.0 clock-v0.1.0" \
+    on_history="weather-v0.1.0" api "$d"
+check "the apps' language pack tag is found" find_runs "$d/out"
+check "and printed" diff <(echo "apps-l10n 95") "$d/out"
+d=$(mktemp -d -p "$scratch"); apps_l10n_runs="95:l10n-20261108:success" apps_tags="weather-v0.1.0 weather-v0.2.0 radio-v0.1.0" \
+    on_history="weather-v0.1.0 weather-v0.2.0 radio-v0.1.0" api "$d"
+check "app packs built on releases not published yet wait" find_runs "$d/out"
+check "nothing is printed for those" test ! -s "$d/out"
+check "it names the releases" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'wait for radio-v0.1.0, weather-v0.2.0 to be published'"
+d=$(mktemp -d -p "$scratch"); apps_runs="61:success:push:weather-v0.2.0" apps_l10n_runs="95:l10n-20261108:success" \
+    apps_tags="weather-v0.1.0 weather-v0.2.0" on_history="weather-v0.1.0 weather-v0.2.0" api "$d"
+check "they go with the app's release" find_runs "$d/out"
+check "both are printed" diff <(printf 'apps 61\napps-l10n 95\n') "$d/out"
 
 d=$(mktemp -d -p "$scratch"); apps_runs="61:success:push:weather-v0.2.0 59:success:push:weather-v0.1.0" api "$d"
 check "a new app tag is found" find_runs "$d/out"

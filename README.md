@@ -16,6 +16,7 @@ One suite, `rolling`, for Debian testing:
 | `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
 | `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`, with its language packs `bande-<app>-l10n-*`: Terminal, Software, the Package Installer and Activity Monitor (recommended by `bande-desktop`), Mail, Calendar |
 | `main` | amd64, arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/web` that built the browser | `bande-browser`, `bande-browser-l10n-*` |
+| `main` | all | green `l10n.yml` runs of `l10n-YYYYMMDD[.N]` tag pushes of `bande-linux/desktop` and of `bande-linux/apps`, the tagged commit on `main`: translation-only builds | `bande-desktop-l10n-*`, `bande-<app>-l10n-*`, each at `<release>+l10nYYYYMMDD[.N]` |
 | `main` | all | green `dict.yml` runs of `dict-YYYYMMDD` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-dict-*`, Dictionary's packs |
 | `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` that built a kernel | `linux-*-apple-*`, `bande-os-apple` |
 
@@ -73,6 +74,12 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
      the publish records every apps run it took or refused there, so a refused tag is not
      tried again until the app tags a newer version.
 
+   - l10n and apps-l10n: the green `l10n.yml` push of the highest `l10n-YYYYMMDD[.N]` tag of the
+     desktop and of the apps, unless `state/processed` lists it (the publish records every one
+     it took or refused). It waits while a release tag on the run's history (`vX.Y.Z`, or an
+     app's `<app>-vX.Y.Z`) is newer than what `main` serves or this publish takes, since its
+     packs are built on that release.
+
    - resign: the live `InRelease`'s `Valid-Until` is less than 7 days out, or missing. Past
      it, only the re-sign is started.
 
@@ -95,6 +102,11 @@ same releases.
      at the run's commit; it carries `bande-dict-*` alone, at `YYYYMMDD`, in `all`;
    - an apps run must be the `push` of an `<app>-vX.Y.Z` tag that points at the run's commit,
      for an `apps/<app>` at that commit; dispatch runs are test builds and are never published;
+   - an l10n or apps-l10n run must be the `l10n.yml` `push` of an `l10n-YYYYMMDD[.N]` tag that
+     points at the run's commit; it carries packs alone (`bande-desktop-l10n-*`, or
+     `bande-<app>-l10n-*` for an `apps/<app>` at that commit, never a desktop name), in `all`,
+     each at `<release>+l10n<stamp>` where the release tag (`v<release>`, `<app>-v<release>`) is on
+     the run's history;
    - its commit must be on `main`.
 
    It then downloads the `bande-debs-ARCH` artifacts. The desktop uploads `amd64`, `arm64`
@@ -127,6 +139,10 @@ same releases.
      version;
    - for apps, each package stands alone: one whose version is already published, or older, is
      skipped and the published one kept;
+   - for language packs (`--add-l10n desktop:main=DIR`, `--add-l10n apps:main=DIR`), after every
+     other addition, a pack at `<release>+l10n<stamp>` goes in only while the package it
+     `Enhances` is at `<release>`: one built on an older release, or on one not published, is
+     skipped, so a translation-only build never replaces a newer release's packs;
    - it refuses a name that `state/owners` gives to another source;
    - reprepro builds the pool and the `Packages` indexes; `apt-ftparchive release` writes
      `Release` with SHA256 sums, `Acquire-By-Hash: yes` and `Valid-Until` 14 days out, and copies every index to

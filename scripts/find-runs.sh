@@ -17,6 +17,11 @@
 # - apps: per app, the green build.yml push of its highest <app>-vX.Y.Z tag,
 #   when X.Y.Z is newer than the live bande-<app>'s in main and the run is not
 #   in the live state/processed, which holds the runs already taken or refused.
+# - l10n and apps-l10n: the green l10n.yml push of the highest l10n-YYYYMMDD[.N]
+#   tag of the desktop and of the apps, translation-only language packs, unless
+#   state/processed holds the run. It waits while a release tag on the run's
+#   history is newer than what the archive serves or this publish takes, since
+#   its packs are built on that release (rebuild.sh --add-l10n).
 # - resign: "resign VALID_UNTIL" when the live InRelease has fewer than 7 days
 #   left before its Valid-Until, or none. An InRelease past it may be an old one
 #   replayed: it is no base for new runs, so only "resign expired" is printed,
@@ -115,7 +120,7 @@ fi
 
 listing "$api/repos/bande-linux/desktop/actions/workflows/release.yml/runs?event=push&status=success&per_page=100" \
     "$work/desktop.json" '{"workflow_runs": []}' "the desktop's release runs"
-desktop_run='' desktop_version=''
+desktop_run='' desktop_version='' desktop_next=''
 while read -r id ref; do
     [[ ${ref#refs/tags/} =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || continue
     if [ -z "$desktop_version" ] || dpkg --compare-versions "${BASH_REMATCH[1]}" gt "$desktop_version"; then
@@ -125,8 +130,10 @@ done < <(jq -r '.workflow_runs[] | select(.event == "push" and .conclusion == "s
     "$work/desktop.json")
 if [ -n "$desktop_run" ]; then
     served=$(live_version main arm64 bande-desktop)
+    desktop_next=$served
     if newer "$desktop_version" "$served"; then
         echo "desktop $desktop_run"
+        desktop_next=$desktop_version
     else
         echo "find-runs: desktop $desktop_version (run $desktop_run) is published" >&2
     fi
@@ -196,7 +203,7 @@ if [ -e "$work/Release" ]; then
 fi
 listing "$api/repos/bande-linux/apps/actions/workflows/build.yml/runs?event=push&status=success&per_page=100" \
     "$work/apps.json" '{"workflow_runs": []}' "the apps' build runs"
-declare -A app_run app_version
+declare -A app_run app_version app_next
 while read -r id ref; do
     [[ ${ref#refs/tags/} =~ ^([a-z0-9][a-z0-9-]*)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || continue
     app=${BASH_REMATCH[1]} version=${BASH_REMATCH[2]}
@@ -208,11 +215,73 @@ done < <(jq -r '.workflow_runs[] | select(.event == "push" and .conclusion == "s
 for app in $(printf '%s\n' "${!app_run[@]}" | sort); do
     id=${app_run[$app]} version=${app_version[$app]}
     served=$(live_version main arm64 "bande-$app")
+    app_next[$app]=$served
     if ! newer "$version" "$served"; then
         echo "find-runs: bande-$app $version (run $id) is published" >&2
     elif grep -qx "apps $id" "$work/processed"; then
         echo "find-runs: bande-$app $version (run $id) was refused before" >&2
     else
         echo "apps $id"
+        app_next[$app]=$version
     fi
 done
+
+# release_waits REPO SHA PREFIX NEXT: true, naming it, when REPO's highest
+# PREFIXvX.Y.Z tag is newer than NEXT, the version the archive will serve, and is
+# on the history of SHA.
+release_waits() {
+    local repo=$1 sha=$2 prefix=$3 next=$4 tag='' version='' name status
+    while read -r name; do
+        [[ $name =~ ^${prefix}v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || continue
+        if [ -z "$version" ] || dpkg --compare-versions "${BASH_REMATCH[1]}" gt "$version"; then
+            tag=$name version=${BASH_REMATCH[1]}
+        fi
+    done < <(jq -r '.[].ref | ltrimstr("refs/tags/")' "$work/$repo-tags.json")
+    [ -n "$tag" ] && newer "$version" "$next" || return 1
+    status=$(call "$api/repos/bande-linux/$repo/compare/$tag...$sha" | jq -r .status) ||
+        fail "cannot compare $repo $tag with $sha"
+    [ "$status" = ahead ] || [ "$status" = identical ] || return 1
+    echo "$tag"
+}
+
+# l10n SOURCE REPO: the green l10n.yml push of REPO's highest l10n tag, printed as
+# SOURCE unless it was taken or a release it is built on is not published yet.
+l10n() {
+    local source=$1 repo=$2 run='' stamp='' sha='' id ref head waits app tag
+    listing "$api/repos/bande-linux/$repo/actions/workflows/l10n.yml/runs?event=push&status=success&per_page=100" \
+        "$work/$source.json" '{"workflow_runs": []}' "the language pack runs of the $repo"
+    while read -r id ref head; do
+        [[ ${ref#refs/tags/} =~ ^l10n-([0-9]{8}(\.[0-9]+)?)$ ]] || continue
+        if [ -z "$stamp" ] || dpkg --compare-versions "${BASH_REMATCH[1]}" gt "$stamp"; then
+            run=$id stamp=${BASH_REMATCH[1]} sha=$head
+        fi
+    done < <(jq -r '.workflow_runs[] | select(.event == "push" and .conclusion == "success")
+        | "\(.id) \(.head_branch) \(.head_sha)"' "$work/$source.json")
+    if [ -z "$run" ]; then
+        echo "find-runs: the $repo has no green l10n-YYYYMMDD run" >&2
+        return 0
+    fi
+    if grep -qx "$source $run" "$work/processed"; then
+        echo "find-runs: the language packs l10n-$stamp of the $repo (run $run) were taken" >&2
+        return 0
+    fi
+    listing "$api/repos/bande-linux/$repo/git/matching-refs/tags/" "$work/$repo-tags.json" '[]' "the tags of the $repo"
+    if [ "$repo" = desktop ]; then
+        waits=$(release_waits desktop "$sha" "" "${desktop_next:-$(live_version main arm64 bande-desktop)}") || waits=''
+    else
+        waits=''
+        for app in $(jq -r '.[].ref | ltrimstr("refs/tags/") | capture("^(?<a>[a-z0-9][a-z0-9-]*)-v[0-9]+[.][0-9]+[.][0-9]+$").a' \
+            "$work/$repo-tags.json" | sort -u); do
+            if tag=$(release_waits apps "$sha" "$app-" "${app_next[$app]-$(live_version main arm64 "bande-$app")}"); then
+                waits+="${waits:+, }$tag"
+            fi
+        done
+    fi
+    if [ -n "$waits" ]; then
+        echo "find-runs: the language packs l10n-$stamp of the $repo (run $run) wait for $waits to be published" >&2
+    else
+        echo "$source $run"
+    fi
+}
+l10n l10n desktop
+l10n apps-l10n apps

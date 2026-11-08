@@ -64,7 +64,7 @@ jobs:
               continue
             fi
             source=$repo
-            [ "$source" != dict ] || source=desktop
+            case $source in dict | l10n) source=desktop ;; apps-l10n) source=apps ;; esac
             ref=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/bande-linux/$source/actions/runs/$id" | jq -r '.head_branch // "?"') || ref='?'
             echo "- $repo $ref (run $id)" >> "$GITHUB_STEP_SUMMARY"
           done < runs
@@ -118,6 +118,19 @@ jobs:
           apps=()
           while read -r repo run; do
             [ "$repo" != apt ] && [ "$repo" != resign ] || continue
+            if [ "$repo" = l10n ] || [ "$repo" = apps-l10n ]; then
+              # Packs go in only for the release they were built on, and the run is taken either way.
+              owner=desktop
+              [ "$repo" = l10n ] || owner=apps
+              if env -u GITHUB_OUTPUT scripts/fetch-run.sh "$repo" "$run" "debs-$repo" < /dev/null; then
+                printf -- '--add-l10n\n%s:main=debs-%s\n' "$owner" "$repo" >> adds
+              else
+                echo "::error::$repo run $run is refused; it is marked as taken and left out"
+                echo "$repo $run" >> refused
+              fi
+              printf -- '--processed\n%s=%s\n' "$repo" "$run" >> adds
+              continue
+            fi
             if [ "$repo" = apps ]; then
               apps+=("$run")
               if ! env -u GITHUB_OUTPUT scripts/fetch-run.sh apps "$run" debs-apps < /dev/null; then

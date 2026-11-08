@@ -65,7 +65,7 @@ jobs:
               names+=("apt $id")
             else
               source=$repo
-              [ "$source" != dict ] || source=desktop
+              case $source in dict | l10n) source=desktop ;; apps-l10n) source=apps ;; esac
               ref=$(gh api "repos/bande-linux/$source/actions/runs/$id" --jq '.head_branch // "?"') || ref='?'
               names+=("$repo $ref")
             fi
