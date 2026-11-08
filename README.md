@@ -15,6 +15,7 @@ One suite, `rolling`, for Debian testing:
 |---|---|---|---|
 | `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
 | `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`: Terminal, Software, the Package Installer and Activity Monitor (recommended by `bande-desktop`), Mail, Calendar |
+| `main` | amd64, arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/web` that built the browser | `bande-browser`, `bande-browser-l10n-*` |
 | `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` that built a kernel | `linux-*-apple-*`, `bande-os-apple` |
 
 Each package keeps its newest version only, as in Debian's own suites. Kernel packages carry
@@ -39,7 +40,9 @@ repository may publish them, so the archive depends on none of them.
 
 Each package name belongs to one source repository. The site keeps the owners in
 `state/owners`, and a publish refuses a name another source already publishes. An app can never
-take a name the desktop publishes.
+take a name the desktop publishes. [`conf/handovers`](conf/handovers) moves a name from one source
+to another: `bande-browser` went from the apps' own engine to the Firefox-based build of the web
+repository.
 
 ## How a publish works
 
@@ -61,6 +64,7 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    - kernel: the newest green `follow-debian.yml` run on `main` that uploaded a
      `bande-version-VERSION` artifact (runs that found nothing new upload none), against the
      version of `bande-os-apple` in `apple`;
+   - web: the same for `bande-linux/web`, against the version of `bande-browser` in `main`;
    - apps: for each app, the green `build.yml` push of its highest `<app>-vX.Y.Z` tag, against
      the version of `bande-<app>` in `main`, unless the live `state/processed` lists the run:
      the publish records every apps run it took or refused there, so a refused tag is not
@@ -83,20 +87,21 @@ same releases.
      by hand it waits for the run to finish);
    - a desktop run must be the `push` of a `vX.Y.Z` tag that points at the run's commit; a
      desktop push to `main` is refused;
-   - a kernel run must be a `schedule` or `workflow_dispatch` run on `main`;
+   - a kernel or web run must be a `schedule` or `workflow_dispatch` run on `main`;
    - an apps run must be the `push` of an `<app>-vX.Y.Z` tag that points at the run's commit,
      for an `apps/<app>` at that commit; dispatch runs are test builds and are never published;
    - its commit must be on `main`.
 
    It then downloads the `bande-debs-ARCH` artifacts. The desktop uploads `amd64`, `arm64`
-   and `all`, the kernel `arm64`, and apps `amd64` and `arm64`. It refuses:
+   and `all`, the kernel `arm64`, web `amd64`, `arm64` and `all` (the language packs), and apps
+   `amd64` and `arm64`. It refuses:
    - package names outside the repository's list; for apps, exactly `bande-<app>` of the tag,
      and never a name of the desktop's (its `packaging/`
      directories, `bande-desktop`, `xdg-desktop-portal-bande`, the repository
      packages);
    - a package filed under another architecture's artifact;
    - versions other than the run's: exactly the tag's `X.Y.Z` for the desktop, and for the
-     kernel the version its one `bande-version-VERSION` artifact names, of the form
+     kernel and web the version its one `bande-version-VERSION` artifact names, of the form
      `<debian-version>+bandeN`; for an app exactly its tag's `X.Y.Z`, so test builds'
      `+git` versions are refused;
    - an incomplete architecture: one that lacks a package another architecture carries.
@@ -108,7 +113,7 @@ same releases.
    database:
    - its input is the live site, whose `InRelease` signatures, `Packages` and pool checksums are
      all verified, plus the new packages: `--add SOURCE:COMPONENT=DIR` for a desktop or kernel
-     build, `--add-each apps:main=DIR` for apps;
+     build, `--add web:main=DIR` for the browser, `--add-each apps:main=DIR` for apps;
    - a component or architecture that the live `Release` does not list yet starts empty;
    - for a desktop or kernel build, the new packages on each architecture (with the
      architecture-independent ones) must carry one version, and

@@ -1,10 +1,10 @@
 #!/bin/bash
 # Usage: fetch-run.sh REPO RUN_ID OUT_DIR
-# Verifies a CI run of bande-linux/REPO (desktop, kernel or apps): the
+# Verifies a CI run of bande-linux/REPO (desktop, kernel, web or apps): the
 # repository's release workflow, finished green, its commit on main.
 # - desktop: the push of a vX.Y.Z tag that points at the run's commit; its
 #   packages carry X.Y.Z.
-# - kernel: a schedule or dispatch on main, naming its version with one
+# - kernel and web: a schedule or dispatch on main, naming its version with one
 #   bande-version-VERSION artifact, which its packages carry.
 # - apps: the push of an <app>-vX.Y.Z tag that points at the run's commit, for
 #   an apps/<app> at that commit; it carries bande-<app> alone, at X.Y.Z, never
@@ -25,9 +25,9 @@ wait_limit=${FETCH_RUN_WAIT:-900}
 poll=${FETCH_RUN_POLL:-15}
 # Built by apt itself; no source repository may publish them.
 repository_packages=" bande-archive-keyring bande-apt-source "
-# Names the desktop and the kernel publish, which an app may never take; the
+# Names the desktop, the kernel and the web repository publish, which an app may never take; the
 # desktop's packaging/ directories are added from its main branch.
-reserved=" xdg-desktop-portal-bande libpam-bande-secrets bande-desktop bande-os-apple "
+reserved=" xdg-desktop-portal-bande libpam-bande-secrets bande-desktop bande-os-apple bande-browser "
 fail() { echo "fetch-run: $*" >&2; exit 1; }
 
 # Per repository: its workflow, the events it publishes from, the package names
@@ -48,13 +48,20 @@ case $source_repo in
         component=apple
         architectures=(arm64)
         ;;
+    web)
+        workflow=.github/workflows/follow-debian.yml
+        events=(schedule workflow_dispatch)
+        names=(bande-browser 'bande-browser-l10n-*')
+        component=main
+        architectures=(amd64 arm64 all)
+        ;;
     apps)
         workflow=.github/workflows/build.yml
         events=(push)
         component=main
         architectures=(amd64 arm64)
         ;;
-    *) fail "unknown repository $source_repo; the archive takes desktop, kernel and apps" ;;
+    *) fail "unknown repository $source_repo; the archive takes desktop, kernel, web and apps" ;;
 esac
 repo=bande-linux/$source_repo
 
@@ -110,7 +117,7 @@ case $status in
 esac
 
 call "$api/repos/$repo/actions/runs/$run/artifacts?per_page=100" > "$work/artifacts.json"
-if [ "$source_repo" = kernel ]; then
+if [ "$source_repo" = kernel ] || [ "$source_repo" = web ]; then
     mapfile -t named < <(jq -r '.artifacts[].name | select(startswith("bande-version-")) | ltrimstr("bande-version-")' \
         "$work/artifacts.json")
     [ ${#named[@]} -eq 1 ] || fail "run $run names ${#named[@]} versions; it must upload one bande-version-VERSION artifact"

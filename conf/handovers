@@ -1,0 +1,3 @@
+# PACKAGE FROM TO: a package name handed from one source repository to another.
+# The browser moved from the apps' own engine to the Firefox-based build of bande-linux/web.
+bande-browser apps web

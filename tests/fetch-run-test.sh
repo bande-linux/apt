@@ -31,6 +31,12 @@ kernel_debs() {
     make_deb "$d/art/arm64" linux-image-apple-arm64-16k "$version" arm64
     make_deb "$d/art/arm64" bande-os-apple "$version" arm64
 }
+web_version=153.6.0esr-1+bande1
+web_debs() {
+    local d=$1 arch
+    for arch in amd64 arm64; do make_deb "$d/art/$arch" bande-browser "$web_version" $arch; done
+    make_deb "$d/art/all" bande-browser-l10n-sv-se "$web_version" all
+}
 apps_version=0.1.0
 apps_debs() {
     local d=$1 app=$2 version=${3:-$apps_version} arch
@@ -73,6 +79,10 @@ api() {
         jq --arg n "bande-version-${named-$kernel_version}" '.artifacts += [{id: 99, name: $n}]' \
             "$base/actions/runs/7/artifacts" > "$d/artifacts" && mv "$d/artifacts" "$base/actions/runs/7/artifacts"
     fi
+    if [ "$2" = web ]; then
+        jq --arg n "bande-version-$web_version" '.artifacts += [{id: 99, name: $n}]' \
+            "$base/actions/runs/7/artifacts" > "$d/artifacts" && mv "$d/artifacts" "$base/actions/runs/7/artifacts"
+    fi
     export GITHUB_API_URL
     GITHUB_API_URL=$(serve "$d")
 }
@@ -92,6 +102,8 @@ check "a green kernel run feeds apple" sh -c "'$root/scripts/fetch-run.sh' kerne
 check "it brings the kernel" test -e "$d/out/linux-image-${kernel_abi}_${kernel_version}_arm64.deb"
 d=$(case_dir); kernel_debs "$d"; event=workflow_dispatch api "$d" kernel
 check "a dispatched kernel run is taken" fetch kernel "$d/out"
+d=$(case_dir); web_debs "$d"; api "$d" web
+check "a green web run feeds main with the browser and its language packs" sh -c "'$root/scripts/fetch-run.sh' web 7 '$d/out' | grep -qx component=main && test -e '$d/out/bande-browser_${web_version}_arm64.deb' -a -e '$d/out/bande-browser-l10n-sv-se_${web_version}_all.deb'"
 d=$(case_dir); desktop_debs "$d" 0.1.1; ref=v0.1.1 api "$d" desktop
 check "an annotated tag is followed to its commit" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=refs/tags/v0.1.0 api "$d" desktop

@@ -10,6 +10,8 @@
 # - kernel: the newest green follow-debian.yml schedule or dispatch run on main
 #   with a bande-version-VERSION artifact; the live one is bande-os-apple's in
 #   apple;
+# - web: the same for bande-linux/web, the browser; the live one is
+#   bande-browser's in main;
 # - apps: per app, the green build.yml push of its highest <app>-vX.Y.Z tag,
 #   when X.Y.Z is newer than the live bande-<app>'s in main and the run is not
 #   in the live state/processed, which holds the runs already taken or refused.
@@ -130,27 +132,34 @@ else
     echo "find-runs: the desktop has no green vX.Y.Z release run" >&2
 fi
 
-listing "$api/repos/bande-linux/kernel/actions/artifacts?per_page=100" "$work/kernel.json" '{"artifacts": []}' \
-    "the kernel's artifacts"
-kernel_run='' kernel_version=''
-while read -r id version; do
-    call "$api/repos/bande-linux/kernel/actions/runs/$id" > "$work/run.json" || fail "cannot read kernel run $id"
-    jq -e '.path == ".github/workflows/follow-debian.yml" and .head_branch == "main" and .conclusion == "success"
-        and (.event == "schedule" or .event == "workflow_dispatch")' "$work/run.json" > /dev/null || continue
-    kernel_run=$id kernel_version=$version
-    break
-done < <(jq -r '.artifacts[] | select((.name | startswith("bande-version-")) and (.expired | not))
-    | "\(.workflow_run.id) \(.name | ltrimstr("bande-version-"))"' "$work/kernel.json" | head -20)
-if [ -n "$kernel_run" ]; then
-    served=$(live_version apple arm64 bande-os-apple)
-    if newer "$kernel_version" "$served"; then
-        echo "kernel $kernel_run"
-    else
-        echo "find-runs: kernel $kernel_version (run $kernel_run) is published" >&2
+# follow_debian REPO COMPONENT PACKAGE: the newest green follow-debian.yml
+# schedule or dispatch run on main of REPO with a bande-version-VERSION
+# artifact, printed when VERSION is newer than PACKAGE's in COMPONENT.
+follow_debian() {
+    local repo=$1 component=$2 package=$3 run='' version='' id named served
+    listing "$api/repos/bande-linux/$repo/actions/artifacts?per_page=100" "$work/$repo.json" '{"artifacts": []}' \
+        "the $repo's artifacts"
+    while read -r id named; do
+        call "$api/repos/bande-linux/$repo/actions/runs/$id" > "$work/run.json" || fail "cannot read $repo run $id"
+        jq -e '.path == ".github/workflows/follow-debian.yml" and .head_branch == "main" and .conclusion == "success"
+            and (.event == "schedule" or .event == "workflow_dispatch")' "$work/run.json" > /dev/null || continue
+        run=$id version=$named
+        break
+    done < <(jq -r '.artifacts[] | select((.name | startswith("bande-version-")) and (.expired | not))
+        | "\(.workflow_run.id) \(.name | ltrimstr("bande-version-"))"' "$work/$repo.json" | head -20)
+    if [ -z "$run" ]; then
+        echo "find-runs: the $repo has no green follow-debian run that built a package" >&2
+        return 0
     fi
-else
-    echo "find-runs: the kernel has no green run that built a kernel" >&2
-fi
+    served=$(live_version "$component" arm64 "$package")
+    if newer "$version" "$served"; then
+        echo "$repo $run"
+    else
+        echo "find-runs: $repo $version (run $run) is published" >&2
+    fi
+}
+follow_debian kernel apple bande-os-apple
+follow_debian web main bande-browser
 
 : > "$work/processed"
 if [ -e "$work/Release" ]; then

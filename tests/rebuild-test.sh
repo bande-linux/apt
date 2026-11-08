@@ -212,6 +212,11 @@ refuses "the desktop may not take an app" "bande-weather is published from apps,
     rebuild --live "$apps_live" --add desktop:main="$scratch/in-desktop-taken" --out "$scratch/desktop-taken"
 refuses "two sources may not claim one name in one publish" "is published from desktop, not apps" \
     rebuild --live "$live" --add desktop:main="$scratch/in-desktop-taken" --add-each apps:main="$scratch/in-apps" --out "$scratch/both-claim"
+for arch in amd64 arm64; do make_deb "$scratch/in-handed" bande-weather 1.0.0-1+bande1 $arch; done
+echo 'bande-weather apps web' > "$conf/handovers"
+check "a handed-over name is taken by its new source" rebuild --live "$apps_live" --add web:main="$scratch/in-handed" --out "$scratch/handed"
+rm "$conf/handovers"
+check "which then owns it" grep -qx 'bande-weather web' "$scratch/handed/state/owners"
 
 make_deb "$scratch/in-arm64" bande-compositor "$d1" arm64
 make_deb "$scratch/in-arm64" bande-desktop "$d1" all

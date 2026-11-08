@@ -14,7 +14,8 @@
 # its newest two kernel versions only.
 #
 # The site also keeps state/owners, the source each package comes from: a
-# package of another source's name is refused. And state/processed, the runs
+# package of another source's name is refused, unless conf/handovers moves it:
+# "PACKAGE FROM TO" gives a name FROM published to TO. And state/processed, the runs
 # of each source already taken (--processed adds to it), which find-runs.sh
 # reads.
 #
@@ -187,7 +188,10 @@ newest() {
 
 shopt -s nullglob
 : > "$work/new"
-cp "$work/owners" "$work/claims"
+handovers=$conf/handovers
+[ -f "$handovers" ] || handovers=/dev/null
+awk 'FILENAME == ARGV[1] { if ($0 !~ /^#/ && NF == 3) to[$1 " " $2] = $3; next }
+    ($1 " " $2) in to { $2 = to[$1 " " $2] } { print }' "$handovers" "$work/owners" > "$work/claims"
 for batch in "${batches[@]}"; do
     mode=${batch%% *} batch=${batch#* }
     source=${batch%%:*} component=${batch#*:} component=${component%%=*} debs=${batch#*=}
