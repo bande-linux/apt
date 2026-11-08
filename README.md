@@ -16,6 +16,7 @@ One suite, `rolling`, for Debian testing:
 | `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
 | `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`: Terminal, Software, the Package Installer and Activity Monitor (recommended by `bande-desktop`), Mail, Calendar |
 | `main` | amd64, arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/web` that built the browser | `bande-browser`, `bande-browser-l10n-*` |
+| `main` | all | green `dict.yml` runs of `dict-YYYYMMDD` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-dict-*`, Dictionary's packs |
 | `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` that built a kernel | `linux-*-apple-*`, `bande-os-apple` |
 
 Each package keeps its newest version only, as in Debian's own suites. Kernel packages carry
@@ -61,6 +62,8 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    - apt: repository packages of a version newer than the live `bande-archive-keyring`;
    - desktop: the green `release.yml` push of the highest `vX.Y.Z` tag, against the version of
      `bande-desktop` in `main`;
+   - dict: the green `dict.yml` push of the desktop's highest `dict-YYYYMMDD` tag, against the
+     version of `bande-dict-en` in `main`;
    - kernel: the newest green `follow-debian.yml` run on `main` that uploaded a
      `bande-version-VERSION` artifact (runs that found nothing new upload none), against the
      version of `bande-os-apple` in `apple`;
@@ -88,6 +91,8 @@ same releases.
    - a desktop run must be the `push` of a `vX.Y.Z` tag that points at the run's commit; a
      desktop push to `main` is refused;
    - a kernel or web run must be a `schedule` or `workflow_dispatch` run on `main`;
+   - a dict run must be the desktop's `dict.yml` `push` of a `dict-YYYYMMDD` tag that points
+     at the run's commit; it carries `bande-dict-*` alone, at `YYYYMMDD`, in `all`;
    - an apps run must be the `push` of an `<app>-vX.Y.Z` tag that points at the run's commit,
      for an `apps/<app>` at that commit; dispatch runs are test builds and are never published;
    - its commit must be on `main`.

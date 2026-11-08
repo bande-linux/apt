@@ -44,6 +44,14 @@ api() {
             '{path: ".github/workflows/follow-debian.yml", head_branch: "main", event: $e, conclusion: $c}' \
             > "$base/kernel/actions/runs/$id"
     done
+    mkdir -p "$base/desktop/actions/workflows/dict.yml"
+    echo '{"workflow_runs": []}' > "$base/desktop/actions/workflows/dict.yml/runs"
+    for run in ${dict_runs:-}; do
+        IFS=: read -r id tag conclusion <<< "$run"
+        jq --argjson i "$id" --arg t "$tag" --arg c "$conclusion" \
+            '.workflow_runs += [{id: $i, event: "push", head_branch: $t, conclusion: $c}]' \
+            "$base/desktop/actions/workflows/dict.yml/runs" > "$d/x" && mv "$d/x" "$base/desktop/actions/workflows/dict.yml/runs"
+    done
     mkdir -p "$base/apps/actions/workflows/build.yml"
     echo '{"workflow_runs": []}' > "$base/apps/actions/workflows/build.yml/runs"
     for run in ${apps_runs:-}; do
@@ -89,6 +97,10 @@ check "the highest tag decides" test ! -s "$d/out"
 d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" kernel_runs="40:7.2.12-1+bande1:success" api "$d"
 check "an empty site takes every release" find_runs "$d/out" "$(serve "$empty")"
 check "both are printed for it" diff <(printf 'desktop 30\nkernel 40\n') "$d/out"
+
+d=$(mktemp -d -p "$scratch"); dict_runs="81:dict-20261108:success 80:dict-20261101:success 82:dict-2026:success 83:dict-20261201:failure" api "$d"
+check "the highest green dictionary tag is found" find_runs "$d/out"
+check "only that dictionary run is printed" diff <(echo "dict 81") "$d/out"
 
 d=$(mktemp -d -p "$scratch"); apps_runs="61:success:push:weather-v0.2.0 59:success:push:weather-v0.1.0" api "$d"
 check "a new app tag is found" find_runs "$d/out"

@@ -7,6 +7,8 @@
 #   bande-archive-keyring's;
 # - desktop: the green release.yml push of the highest vX.Y.Z tag, whose
 #   version is the tag; the live one is bande-desktop's in main;
+# - dict: the green dict.yml push of the desktop's highest dict-YYYYMMDD tag,
+#   whose version is the date; the live one is bande-dict-en's in main;
 # - kernel: the newest green follow-debian.yml schedule or dispatch run on main
 #   with a bande-version-VERSION artifact; the live one is bande-os-apple's in
 #   apple;
@@ -130,6 +132,27 @@ if [ -n "$desktop_run" ]; then
     fi
 else
     echo "find-runs: the desktop has no green vX.Y.Z release run" >&2
+fi
+
+listing "$api/repos/bande-linux/desktop/actions/workflows/dict.yml/runs?event=push&status=success&per_page=100" \
+    "$work/dict.json" '{"workflow_runs": []}' "the dictionary pack runs"
+dict_run='' dict_version=''
+while read -r id ref; do
+    [[ ${ref#refs/tags/} =~ ^dict-([0-9]{8})$ ]] || continue
+    if [ -z "$dict_version" ] || dpkg --compare-versions "${BASH_REMATCH[1]}" gt "$dict_version"; then
+        dict_run=$id dict_version=${BASH_REMATCH[1]}
+    fi
+done < <(jq -r '.workflow_runs[] | select(.event == "push" and .conclusion == "success") | "\(.id) \(.head_branch)"' \
+    "$work/dict.json")
+if [ -n "$dict_run" ]; then
+    served=$(live_version main arm64 bande-dict-en)
+    if newer "$dict_version" "$served"; then
+        echo "dict $dict_run"
+    else
+        echo "find-runs: the dictionary packs $dict_version (run $dict_run) are published" >&2
+    fi
+else
+    echo "find-runs: the desktop has no green dict-YYYYMMDD run" >&2
 fi
 
 # follow_debian REPO COMPONENT PACKAGE: the newest green follow-debian.yml
