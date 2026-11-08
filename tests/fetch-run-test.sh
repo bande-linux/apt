@@ -58,7 +58,10 @@ api() {
         > "$d/repos/bande-linux/desktop/contents/packaging"
     jq -n --arg s "${tagged:-$sha}" '{object: {type: "commit", sha: $s}}' > "$base/git/ref/tags/v0.1.0"
     jq -n '{object: {type: "tag", sha: "abcd"}}' > "$base/git/ref/tags/v0.1.1"
-    if [[ ${ref#refs/tags/} = dict-* ]]; then
+    for tag in ${released-v0.1.0 weather-v0.1.0}; do
+        jq -n --arg s "${history:-ahead}" '{status: $s}' > "$base/compare/$tag...$sha"
+    done
+    if [[ ${ref#refs/tags/} = dict-* || ${ref#refs/tags/} = l10n-* ]]; then
         jq -n --arg s "${tagged:-$sha}" '{object: {type: "commit", sha: $s}}' > "$base/git/ref/tags/${ref#refs/tags/}"
     fi
     if [ "$2" = apps ] && [ -z "${untagged:-}" ] && [[ ${ref#refs/tags/} = *-v* ]]; then
@@ -107,6 +110,45 @@ d=$(case_dir); make_deb "$d/art/all" bande-desktop 20261108 all; workflow=dict.y
 refuses "a dictionary run may publish only packs" "dict does not publish" fetch dict "$d/out"
 d=$(case_dir); make_deb "$d/art/all" bande-dict-en 20261108 all; ref=dict-20261108 api "$d" desktop
 refuses "a dictionary tag from the release workflow is refused" "not .github/workflows/dict.yml" fetch dict "$d/out"
+l10n_debs() {
+    local d=$1 package=$2 version=$3
+    make_deb "$d/art/all" "$package-l10n-sv" "$version" all
+    make_deb "$d/art/all" "$package-l10n-en-gb" "$version" all
+}
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+check "a green language pack run of the desktop feeds main" sh -c "'$root/scripts/fetch-run.sh' l10n 7 '$d/out' | grep -qx component=main"
+check "it brings the packs" test -e "$d/out/bande-desktop-l10n-sv_0.1.0+l10n20261108_all.deb" -a \
+    -e "$d/out/bande-desktop-l10n-en-gb_0.1.0+l10n20261108_all.deb"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108.2; workflow=l10n.yml ref=l10n-20261108.2 api "$d" desktop
+check "a second language pack tag of a day is taken" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261107; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+refuses "packs of another date than the tag are refused" "not RELEASE+l10n20261108" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+refuses "packs at a release's version are refused" "not RELEASE+l10n20261108" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.2.0+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+refuses "packs on a release the desktop does not have are refused" "built on v0.2.0, which" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108; history=behind workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+refuses "packs on a release off the run's history are refused" "not on the history" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108; make_deb "$d/art/all" bande-desktop 0.1.0+l10n20261108 all
+workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+refuses "a language pack run may publish only the desktop's packs" "l10n does not publish" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108; workflow=l10n.yml ref=l10n-2026 api "$d" desktop
+refuses "a malformed language pack tag is refused" "publish l10n-YYYYMMDD tags" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108; ref=l10n-20261108 api "$d" desktop
+refuses "a language pack tag from the release workflow is refused" "not .github/workflows/l10n.yml" fetch l10n "$d/out"
+
+d=$(case_dir); l10n_debs "$d" bande-weather 0.1.0+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
+check "a green language pack run of the apps feeds main" sh -c "'$root/scripts/fetch-run.sh' apps-l10n 7 '$d/out' | grep -qx component=main"
+check "it brings the app's packs" test -e "$d/out/bande-weather-l10n-sv_0.1.0+l10n20261108_all.deb"
+d=$(case_dir); l10n_debs "$d" bande-radio 0.1.0+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
+refuses "packs of an app without an apps/ directory are refused" "has no apps/radio" fetch apps-l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-clock 0.1.0+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
+refuses "packs on a release tag the app does not have are refused" "built on clock-v0.1.0, which" fetch apps-l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-greeter 0.1.0+l10n20261108; app_dirs=greeter released=greeter-v0.1.0 workflow=l10n.yml ref=l10n-20261108 api "$d" apps
+refuses "the apps may not publish packs for the desktop's programs" "translates the desktop's bande-greeter" fetch apps-l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-weather 0.1.0+l10n20261108; make_deb "$d/art/all" bande-weather 0.1.0+l10n20261108 all; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
+refuses "a language pack run of the apps may publish only packs" "apps-l10n does not publish" fetch apps-l10n "$d/out"
+
 d=$(case_dir); kernel_debs "$d"; api "$d" kernel
 check "a green kernel run feeds apple" sh -c "'$root/scripts/fetch-run.sh' kernel 7 '$d/out' | grep -qx component=apple"
 check "it brings the kernel" test -e "$d/out/linux-image-${kernel_abi}_${kernel_version}_arm64.deb"
@@ -177,6 +219,13 @@ d=$(case_dir); apps_debs "$d" weather; api "$d" apps
 check "an app's tag run feeds main" sh -c "'$root/scripts/fetch-run.sh' apps 7 '$d/out' | grep -qx component=main"
 check "it brings the app for amd64 and arm64" test -e "$d/out/bande-weather_${apps_version}_amd64.deb" -a \
     -e "$d/out/bande-weather_${apps_version}_arm64.deb"
+d=$(case_dir); apps_debs "$d" weather
+for arch in amd64 arm64; do make_deb "$d/art/$arch" bande-weather-l10n-sv "$apps_version" all; done; api "$d" apps
+check "an app's release brings its packs from each architecture's artifact" sh -c "'$root/scripts/fetch-run.sh' apps 7 '$d/out' && test -e '$d/out/bande-weather-l10n-sv_${apps_version}_all.deb'"
+d=$(case_dir); apps_debs "$d" weather; make_deb "$d/art/arm64" bande-clock-l10n-sv "$apps_version" all; api "$d" apps
+refuses "an app's release may not bring another app's packs" "apps does not publish" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" weather; make_deb "$d/art/arm64" bande-weather-data "$apps_version" all; api "$d" apps
+refuses "an app's release may bring only packs for all architectures" "holds bande-weather-data for all" fetch apps "$d/out"
 d=$(case_dir); apps_debs "$d" weather; ref=refs/tags/weather-v0.1.0 api "$d" apps
 check "a full apps tag ref is taken" fetch apps "$d/out"
 d=$(case_dir); apps_debs "$d" clock-face; app_dirs=clock-face ref=clock-face-v0.1.0 api "$d" apps

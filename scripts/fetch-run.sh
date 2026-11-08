@@ -1,16 +1,26 @@
 #!/bin/bash
 # Usage: fetch-run.sh REPO RUN_ID OUT_DIR
-# Verifies a CI run of bande-linux/REPO (desktop, dict, kernel, web or apps): the
-# repository's release workflow, finished green, its commit on main.
+# Verifies a CI run of bande-linux/REPO (desktop, dict, l10n, kernel, web, apps or
+# apps-l10n): the repository's release workflow, finished green, its commit on main.
 # - desktop: the push of a vX.Y.Z tag that points at the run's commit; its
 #   packages carry X.Y.Z.
 # - dict: the desktop's dict.yml push of a dict-YYYYMMDD tag that points at
 #   the run's commit; it carries bande-dict-* packages alone, at YYYYMMDD.
+# - l10n: the desktop's l10n.yml push of an l10n-YYYYMMDD[.N] tag that points at
+#   the run's commit; it carries bande-desktop-l10n-* packs alone, each at
+#   RELEASE+l10nYYYYMMDD[.N], where vRELEASE is a desktop tag on the run's commit's
+#   history.
 # - kernel and web: a schedule or dispatch on main, naming its version with one
 #   bande-version-VERSION artifact, which its packages carry.
 # - apps: the push of an <app>-vX.Y.Z tag that points at the run's commit, for
 #   an apps/<app> at that commit; it carries bande-<app> alone, at X.Y.Z, never
-#   a name of the desktop's. Dispatch runs are test builds and never published.
+#   a name of the desktop's, and its packs bande-<app>-l10n-*, architecture all,
+#   in each architecture's artifact. Dispatch runs are test builds and never
+#   published.
+# - apps-l10n: the apps' l10n.yml push of an l10n-YYYYMMDD[.N] tag that points at
+#   the run's commit; it carries bande-<app>-l10n-* packs alone, for apps/<app>
+#   at that commit, each at RELEASE+l10nYYYYMMDD[.N], where <app>-vRELEASE is a
+#   tag on the run's commit's history.
 # Then downloads its bande-debs-ARCH artifacts into OUT_DIR and checks that they
 # carry only the repository's own package names, every architecture it builds
 # and the same packages for each. A package OUT_DIR already holds at a newer
@@ -21,7 +31,7 @@
 # seconds (default 900) for it to end.
 set -euo pipefail
 
-source_repo=$1 run=$2 out=$3
+source_repo=$1 run=$2 out=$3 stamp=""
 api=${GITHUB_API_URL:-https://api.github.com}
 wait_limit=${FETCH_RUN_WAIT:-900}
 poll=${FETCH_RUN_POLL:-15}
@@ -50,6 +60,20 @@ case $source_repo in
         component=main
         architectures=(all)
         ;;
+    l10n)
+        workflow=.github/workflows/l10n.yml
+        events=(push)
+        names=('bande-desktop-l10n-*')
+        component=main
+        architectures=(all)
+        ;;
+    apps-l10n)
+        workflow=.github/workflows/l10n.yml
+        events=(push)
+        names=('bande-*-l10n-*')
+        component=main
+        architectures=(all)
+        ;;
     kernel)
         workflow=.github/workflows/follow-debian.yml
         events=(schedule workflow_dispatch)
@@ -70,10 +94,13 @@ case $source_repo in
         component=main
         architectures=(amd64 arm64)
         ;;
-    *) fail "unknown repository $source_repo; the archive takes desktop, dict, kernel, web and apps" ;;
+    *) fail "unknown repository $source_repo; the archive takes desktop, dict, l10n, kernel, web, apps and apps-l10n" ;;
 esac
-repo=bande-linux/$source_repo
-[ "$source_repo" != dict ] || repo=bande-linux/desktop
+case $source_repo in
+    dict | l10n) repo=bande-linux/desktop ;;
+    apps-l10n) repo=bande-linux/apps ;;
+    *) repo=bande-linux/$source_repo ;;
+esac
 
 call() {
     curl -fsSL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
@@ -88,9 +115,12 @@ read -r event path ref sha owner < <(jq -r '[.event, .path, .head_branch, .head_
 [ "$path" = "$workflow" ] || fail "run $run is from $path, not $workflow"
 [ "$owner" = "$repo" ] || fail "run $run built $owner, not $repo"
 [[ " ${events[*]} " == *" $event "* ]] || fail "run $run was started by $event; $source_repo publishes from ${events[*]}"
-if [ "$source_repo" = desktop ] || [ "$source_repo" = dict ] || [ "$source_repo" = apps ]; then
+if [ "$source_repo" != kernel ] && [ "$source_repo" != web ]; then
     tag=${ref#refs/tags/}
-    if [ "$source_repo" = desktop ]; then
+    if [ "$source_repo" = l10n ] || [ "$source_repo" = apps-l10n ]; then
+        [[ $tag =~ ^l10n-([0-9]{8}(\.[0-9]+)?)$ ]] || fail "run $run built $ref; the language packs publish l10n-YYYYMMDD tags"
+        stamp=${BASH_REMATCH[1]}
+    elif [ "$source_repo" = desktop ]; then
         [[ $tag =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || fail "run $run built $ref; the desktop publishes vX.Y.Z tags"
         want_version=${BASH_REMATCH[1]}
     elif [ "$source_repo" = dict ]; then
@@ -100,7 +130,7 @@ if [ "$source_repo" = desktop ] || [ "$source_repo" = dict ] || [ "$source_repo"
         [[ $tag =~ ^([a-z0-9][a-z0-9-]*)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]] ||
             fail "run $run built $ref; the apps publish <app>-vX.Y.Z tags"
         app=${BASH_REMATCH[1]} want_version=${BASH_REMATCH[2]}
-        names=("bande-$app")
+        names=("bande-$app" "bande-$app-l10n-*")
     fi
     call "$api/repos/$repo/git/ref/tags/$tag" > "$work/tag.json" || fail "tag $tag does not exist"
     read -r type object < <(jq -r '[.object.type, .object.sha] | @tsv' "$work/tag.json")
@@ -137,14 +167,41 @@ if [ "$source_repo" = kernel ] || [ "$source_repo" = web ]; then
     [[ ${named[0]} =~ ^[0-9][A-Za-z0-9.~-]*\+bande[0-9]+$ ]] || fail "run $run names version ${named[0]}, not <debian-version>+bandeN"
     want_version=${named[0]}
 fi
-if [ "$source_repo" = apps ]; then
+if [ "$source_repo" = apps ] || [ "$source_repo" = apps-l10n ]; then
     call "$api/repos/$repo/contents/apps?ref=$sha" > "$work/apps.json" || fail "cannot list apps/ at $sha"
-    jq -e --arg a "$app" 'any(.[]; .type == "dir" and .name == $a)' "$work/apps.json" > /dev/null ||
-        fail "tag $tag names $app, but the run's commit has no apps/$app"
+    if [ "$source_repo" = apps ]; then
+        jq -e --arg a "$app" 'any(.[]; .type == "dir" and .name == $a)' "$work/apps.json" > /dev/null ||
+            fail "tag $tag names $app, but the run's commit has no apps/$app"
+    fi
     call "$api/repos/bande-linux/desktop/contents/packaging?ref=main" > "$work/packaging.json" ||
         fail "cannot list the desktop's packaging/"
     reserved+="$(jq -r '.[] | select(.type == "dir") | .name' "$work/packaging.json" | tr '\n' ' ')"
 fi
+# l10n_version PACKAGE VERSION: a pack of an l10n tag carries RELEASE+l10n$stamp,
+# where the release tag of the program it translates is on the run's history.
+l10n_version() {
+    local package=$1 version=$2 app release tag_name status
+    [[ $version =~ ^([0-9]+\.[0-9]+\.[0-9]+)\+l10n([0-9.]+)$ ]] && [ "${BASH_REMATCH[2]}" = "$stamp" ] ||
+        fail "$package carries version $version, not RELEASE+l10n$stamp"
+    release=${BASH_REMATCH[1]}
+    if [ "$source_repo" = l10n ]; then
+        tag_name=v$release
+    else
+        app=${package#bande-} app=${app%%-l10n-*}
+        jq -e --arg a "$app" 'any(.[]; .type == "dir" and .name == $a)' "$work/apps.json" > /dev/null ||
+            fail "$package is for $app, but the run's commit has no apps/$app"
+        [[ $reserved != *" bande-$app "* ]] || fail "$package translates the desktop's bande-$app; an app may not take it"
+        tag_name=$app-v$release
+    fi
+    if ! grep -qxF "$tag_name" "$work/released" 2> /dev/null; then
+        status=$(call "$api/repos/$repo/compare/$tag_name...$sha" | jq -r .status) ||
+            fail "$package is built on $tag_name, which $repo does not have"
+        case $status in
+            identical | ahead) echo "$tag_name" >> "$work/released" ;;
+            *) fail "$package is built on $tag_name, which is not on the history of $sha ($status)" ;;
+        esac
+    fi
+}
 mkdir -p "$out" "$work/stage"
 : > "$work/names"
 shopt -s nullglob
@@ -158,7 +215,8 @@ for arch in "${architectures[@]}"; do
     unzip -q -j "$work/$name.zip" '*.deb' -d "$work/$name" 2> /dev/null || fail "$name holds no packages"
     for deb in "$work/$name"/*.deb; do
         read -r package version deb_arch < <(dpkg-deb --show --showformat="\${Package} \${Version} \${Architecture}\n" "$deb")
-        [ "$deb_arch" = "$arch" ] || fail "$name holds $package for $deb_arch"
+        [ "$deb_arch" = "$arch" ] || { [ "$source_repo" = apps ] && [ "$deb_arch" = all ] && [[ $package == *-l10n-* ]]; } ||
+            fail "$name holds $package for $deb_arch"
         allowed=0
         for pattern in "${names[@]}"; do
             # shellcheck disable=SC2053 # the names are glob patterns
@@ -169,7 +227,9 @@ for arch in "${architectures[@]}"; do
         if [ "$source_repo" = apps ]; then
             [[ $reserved != *" $package "* ]] || fail "$package is the desktop's; an app may not take it"
         fi
-        if [ "$version" != "$want_version" ]; then
+        if [ -n "${stamp:-}" ]; then
+            l10n_version "$package" "$version"
+        elif [ "$version" != "$want_version" ]; then
             fail "$package carries version $version, the run publishes $want_version"
         fi
         echo "$arch $package $version" >> "$work/names"

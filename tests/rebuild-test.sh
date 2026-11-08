@@ -314,6 +314,42 @@ check "apt downloads from it" "${apt_env[@]}" apt-get install -y -q --download-o
 check "apt downloads the keyring from it" "${apt_env[@]}" apt-get install -y -q --download-only bande-archive-keyring bande-apt-source
 check "the download is the newest build" test -e "$lists/archives/bande-compositor_0.0.0+git20261030.4.bbbbbb4_${host_arch}.deb"
 
+# Language packs of an l10n tag go in only for the release they were built on.
+packs() { local p; for p in sv en-gb; do enhances=$2 make_deb "$1" "$2-l10n-$p" "$3" all; done; }
+make_deb "$scratch/in-l0" bande-desktop 0.1.0 all
+packs "$scratch/in-l0" bande-desktop 0.1.0
+for a in amd64 arm64; do make_deb "$scratch/in-w0" bande-weather 0.1.0 $a; done
+packs "$scratch/in-w0" bande-weather 0.1.0
+check "a release with its packs" rebuild --live "$(serve "$empty")" --add desktop:main="$scratch/in-l0" \
+    --add-each apps:main="$scratch/in-w0" --add-each apt:main="$scratch/in-apt" --out "$scratch/l0"
+packs "$scratch/in-l1" bande-desktop 0.1.0+l10n20261108
+packs "$scratch/in-w1" bande-weather 0.1.0+l10n20261108
+check "packs of the published release" rebuild --live "$(serve "$scratch/l0")" --add-l10n desktop:main="$scratch/in-l1" \
+    --add-l10n apps:main="$scratch/in-w1" --processed l10n=90 --out "$scratch/l1"
+check "replace the release's packs" both "$scratch/l1" main bande-desktop-l10n-en-gb=0.1.0+l10n20261108
+check "an app's packs too" has "$scratch/l1" main arm64 bande-weather-l10n-sv=0.1.0+l10n20261108
+check "and the run is recorded" grep -qx 'l10n 90' "$scratch/l1/state/processed"
+packs "$scratch/in-l2" bande-desktop 0.0.9+l10n20261109
+packs "$scratch/in-w2" bande-weather 0.2.0+l10n20261109
+rebuild --live "$(serve "$scratch/l1")" --add-l10n desktop:main="$scratch/in-l2" --add-l10n apps:main="$scratch/in-w2" \
+    --out "$scratch/l2" > "$scratch/l2.log" 2>&1 || true
+check "are both left out" diff <(listed "$scratch/l1" main arm64) <(listed "$scratch/l2" main arm64)
+check "saying why" grep -q 'skipping bande-weather-l10n-sv 0.2.0+l10n20261109, built for bande-weather 0.2.0; main has 0.1.0' "$scratch/l2.log"
+make_deb "$scratch/in-l3" bande-desktop 0.2.0 all
+packs "$scratch/in-l3" bande-desktop 0.2.0
+packs "$scratch/in-l4" bande-desktop 0.2.0+l10n20261110
+packs "$scratch/in-l5" bande-desktop 0.1.0+l10n20261110
+check "a release published with packs built on it" rebuild --live "$(serve "$scratch/l1")" --add-l10n desktop:main="$scratch/in-l4" \
+    --add desktop:main="$scratch/in-l3" --out "$scratch/l3"
+check "takes those packs" has "$scratch/l3" main amd64 bande-desktop-l10n-sv=0.2.0+l10n20261110
+check "and the release" has "$scratch/l3" main amd64 bande-desktop=0.2.0
+check "a release published with packs built on the one before" rebuild --live "$(serve "$scratch/l1")" \
+    --add-l10n desktop:main="$scratch/in-l5" --add desktop:main="$scratch/in-l3" --out "$scratch/l4"
+check "keeps the release's packs" has "$scratch/l4" main amd64 bande-desktop-l10n-sv=0.2.0
+refuses "packs that enhance no single package are refused" "not one package" rebuild --live "$(serve "$scratch/l1")" \
+    --add-l10n desktop:main="$(enhances='bande-desktop, bande-shell' make_deb "$scratch/in-l6" bande-desktop-l10n-sv 0.1.0+l10n20261111 all; echo "$scratch/in-l6")" \
+    --out "$scratch/l6"
+
 cp "$conf/archive-key.asc" "$scratch/old-key.asc"
 add_archive_key "$conf"
 check "rotation: rebuild signs with old and new key" rebuild --live "$(serve "$site")" --add desktop:main="$scratch/in-4" --out "$scratch/rotated"

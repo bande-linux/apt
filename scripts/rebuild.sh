@@ -1,5 +1,5 @@
 #!/bin/bash
-# Usage: rebuild.sh --live URL --add|--add-each SOURCE:COMPONENT=DIR [...] --out DIR
+# Usage: rebuild.sh --live URL --add|--add-each|--add-l10n SOURCE:COMPONENT=DIR [...] --out DIR
 #                   [--processed SOURCE=ID,...] [--conf DIR] [--cache DIR]
 # Rebuilds the whole archive from the live, signature-checked site plus the
 # packages in each DIR, which come from the repository SOURCE and go to its
@@ -10,6 +10,11 @@
 #   contents, is refused.
 # - --add-each: packages built on their own; one whose version is already
 #   published, or older, is skipped.
+# - --add-l10n: language packs of a translation-only build, each at
+#   RELEASE+l10nSTAMP for the package it enhances at RELEASE. A pack is added only
+#   while that package is at RELEASE in the archive, after this publish's other
+#   additions, so a pack built on an older release, or on one not published
+#   yet, is skipped; otherwise as --add-each.
 # Each package keeps its newest version only, and apple keeps the packages of
 # its newest two kernel versions only.
 #
@@ -54,6 +59,7 @@ while [ $# -gt 0 ]; do
         --live) live=${2%/}; shift 2 ;;
         --add) batches+=("one $2"); shift 2 ;;
         --add-each) batches+=("each $2"); shift 2 ;;
+        --add-l10n) batches+=("l10n $2"); shift 2 ;;
         --processed) processed+=("$2"); shift 2 ;;
         --out) out=$2; shift 2 ;;
         --conf) conf=$2; shift 2 ;;
@@ -63,7 +69,7 @@ while [ $# -gt 0 ]; do
 done
 fail() { echo "rebuild: $*" >&2; exit 1; }
 if [ -z "$live" ] || [ $((${#batches[@]} + ${#processed[@]})) -eq 0 ] || [ -z "$out" ]; then
-    fail "--live, --add, --add-each or --processed, and --out are required"
+    fail "--live, --add, --add-each, --add-l10n or --processed, and --out are required"
 fi
 conf=$(cd "$conf" && pwd)
 [ -s "$conf/archive-key.asc" ] || fail "$conf/archive-key.asc is missing"
@@ -89,7 +95,7 @@ for batch in "${batches[@]}"; do
     [[ " $components " == *" $component "* ]] || fail "$suite has no component $component"
 done
 for entry in "${processed[@]}"; do
-    [[ $entry =~ ^[a-z]+=[0-9]+(,[0-9]+)*$ ]] || fail "--processed $entry is not SOURCE=ID,..."
+    [[ $entry =~ ^[a-z0-9-]+=[0-9]+(,[0-9]+)*$ ]] || fail "--processed $entry is not SOURCE=ID,..."
 done
 
 get() {
@@ -222,31 +228,52 @@ for batch in "${batches[@]}"; do
     cat "$work/batch" >> "$work/new"
 done
 
-while read -r mode c package arch version deb; do
+# add MODE COMPONENT PACKAGE ARCH VERSION DEB: one new package, as its mode says.
+add() {
+    local mode=$1 c=$2 package=$3 arch=$4 version=$5 deb=$6 sha same top base release served
+    if [ "$mode" = l10n ]; then
+        base=$(dpkg-deb -f "$deb" Enhances)
+        [[ $base =~ ^[a-z0-9][a-z0-9.+-]*$ ]] || fail "$package enhances \"$base\", not one package"
+        [[ $version =~ ^(.+)\+l10n[0-9]{8}(\.[0-9]+)?$ ]] || fail "$package $version is not RELEASE+l10nYYYYMMDD"
+        release=${BASH_REMATCH[1]}
+        served=$(awk -v c="$c" -v p="$base" '$1 == c && $2 == p { print $4 }' "$work/rows" | newest)
+        if [ "$served" != "$release" ]; then
+            echo "rebuild: skipping $package $version, built for $base $release; $c has ${served:-no $base}"
+            return 0
+        fi
+        mode=each
+    fi
     sha=$(sha256sum "$deb" | cut -d' ' -f1)
     same=$(awk -v c="$c" -v p="$package" -v a="$arch" -v v="$version" \
         '$1 == c && $2 == p && $3 == a && $4 == v { print $5 }' "$work/rows")
     if [ -n "$same" ]; then
         if [ "$mode" = each ]; then
             echo "rebuild: $package $version ($arch) is already in $c; keeping the published one"
-            continue
+            return 0
         fi
         [ "$(sha256sum "$same" | cut -d' ' -f1)" = "$sha" ] ||
             fail "$package $version ($arch) is already in $c with different contents"
-        continue
+        return 0
     fi
     top=$(awk -v c="$c" -v p="$package" -v a="$arch" '$1 == c && $2 == p && $3 == a { print $4 }' \
         "$work/rows" | newest)
     if [ -n "$top" ] && dpkg --compare-versions "$version" lt "$top"; then
         if [ "$mode" = each ]; then
             echo "rebuild: skipping $package $version ($arch), older than $top in $c"
-            continue
+            return 0
         fi
         fail "$package $version ($arch) is older than $top in $c"
     fi
     cp "$deb" "$work/pool/$sha.deb"
     echo "$c $package $arch $version $work/pool/$sha.deb" >> "$work/rows"
     echo "rebuild: adding $package $version ($arch) to $c"
+}
+# Language packs last, against the releases this publish adds.
+while read -r mode c package arch version deb; do
+    [ "$mode" = l10n ] || add "$mode" "$c" "$package" "$arch" "$version" "$deb"
+done < "$work/new"
+while read -r mode c package arch version deb; do
+    [ "$mode" != l10n ] || add "$mode" "$c" "$package" "$arch" "$version" "$deb"
 done < "$work/new"
 
 mkdir -p "$work/repo/conf"

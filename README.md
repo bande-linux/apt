@@ -14,7 +14,7 @@ One suite, `rolling`, for Debian testing:
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
 | `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
-| `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`: Terminal, Software, the Package Installer and Activity Monitor (recommended by `bande-desktop`), Mail, Calendar |
+| `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`, with its language packs `bande-<app>-l10n-*`: Terminal, Software, the Package Installer and Activity Monitor (recommended by `bande-desktop`), Mail, Calendar |
 | `main` | amd64, arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/web` that built the browser | `bande-browser`, `bande-browser-l10n-*` |
 | `main` | all | green `dict.yml` runs of `dict-YYYYMMDD` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-dict-*`, Dictionary's packs |
 | `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` that built a kernel | `linux-*-apple-*`, `bande-os-apple` |
@@ -100,7 +100,8 @@ same releases.
    It then downloads the `bande-debs-ARCH` artifacts. The desktop uploads `amd64`, `arm64`
    and `all`, the kernel `arm64`, web `amd64`, `arm64` and `all` (the language packs), and apps
    `amd64` and `arm64`. It refuses:
-   - package names outside the repository's list; for apps, exactly `bande-<app>` of the tag,
+   - package names outside the repository's list; for apps, exactly `bande-<app>` of the tag
+     and its packs `bande-<app>-l10n-*` (architecture `all`, in each architecture's artifact),
      and never a name of the desktop's (its `packaging/`
      directories, `bande-desktop`, `xdg-desktop-portal-bande`, the repository
      packages);
