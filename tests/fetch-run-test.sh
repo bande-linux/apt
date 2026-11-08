@@ -52,6 +52,9 @@ api() {
         > "$d/repos/bande-linux/desktop/contents/packaging"
     jq -n --arg s "${tagged:-$sha}" '{object: {type: "commit", sha: $s}}' > "$base/git/ref/tags/v0.1.0"
     jq -n '{object: {type: "tag", sha: "abcd"}}' > "$base/git/ref/tags/v0.1.1"
+    if [[ ${ref#refs/tags/} = dict-* ]]; then
+        jq -n --arg s "${tagged:-$sha}" '{object: {type: "commit", sha: $s}}' > "$base/git/ref/tags/${ref#refs/tags/}"
+    fi
     if [ "$2" = apps ] && [ -z "${untagged:-}" ] && [[ ${ref#refs/tags/} = *-v* ]]; then
         jq -n --arg s "${tagged:-$sha}" '{object: {type: "commit", sha: $s}}' > "$base/git/ref/tags/${ref#refs/tags/}"
     fi
@@ -87,6 +90,13 @@ check "it brings both architectures" test -e "$d/out/bande-compositor_${desktop_
 check "it brings the architecture-independent packages" test -e "$d/out/bande-desktop_${desktop_version}_all.deb"
 d=$(case_dir); desktop_debs "$d"; make_deb "$d/art/all" bande-archive-keyring 1.0 all; api "$d" desktop
 refuses "the desktop may not publish the keyring" "bande-archive-keyring is built by apt itself" fetch desktop "$d/out"
+d=$(case_dir); make_deb "$d/art/all" bande-dict-en 20261108 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
+check "a green dictionary run feeds main" sh -c "'$root/scripts/fetch-run.sh' dict 7 '$d/out' | grep -qx component=main"
+check "it brings the packs" test -e "$d/out/bande-dict-en_20261108_all.deb"
+d=$(case_dir); make_deb "$d/art/all" bande-desktop 20261108 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
+refuses "a dictionary run may publish only packs" "dict does not publish" fetch dict "$d/out"
+d=$(case_dir); make_deb "$d/art/all" bande-dict-en 20261108 all; ref=dict-20261108 api "$d" desktop
+refuses "a dictionary tag from the release workflow is refused" "not .github/workflows/dict.yml" fetch dict "$d/out"
 d=$(case_dir); kernel_debs "$d"; api "$d" kernel
 check "a green kernel run feeds apple" sh -c "'$root/scripts/fetch-run.sh' kernel 7 '$d/out' | grep -qx component=apple"
 check "it brings the kernel" test -e "$d/out/linux-image-${kernel_abi}_${kernel_version}_arm64.deb"

@@ -64,7 +64,9 @@ jobs:
             elif [ "$repo" = apt ]; then
               names+=("apt $id")
             else
-              ref=$(gh api "repos/bande-linux/$repo/actions/runs/$id" --jq '.head_branch // "?"') || ref='?'
+              source=$repo
+              [ "$source" != dict ] || source=desktop
+              ref=$(gh api "repos/bande-linux/$source/actions/runs/$id" --jq '.head_branch // "?"') || ref='?'
               names+=("$repo $ref")
             fi
           done < runs

@@ -1,9 +1,11 @@
 #!/bin/bash
 # Usage: fetch-run.sh REPO RUN_ID OUT_DIR
-# Verifies a CI run of bande-linux/REPO (desktop, kernel or apps): the
+# Verifies a CI run of bande-linux/REPO (desktop, dict, kernel or apps): the
 # repository's release workflow, finished green, its commit on main.
 # - desktop: the push of a vX.Y.Z tag that points at the run's commit; its
 #   packages carry X.Y.Z.
+# - dict: the desktop's dict.yml push of a dict-YYYYMMDD tag that points at
+#   the run's commit; it carries bande-dict-* packages alone, at YYYYMMDD.
 # - kernel: a schedule or dispatch on main, naming its version with one
 #   bande-version-VERSION artifact, which its packages carry.
 # - apps: the push of an <app>-vX.Y.Z tag that points at the run's commit, for
@@ -41,6 +43,13 @@ case $source_repo in
         component=main
         architectures=(amd64 arm64 all)
         ;;
+    dict)
+        workflow=.github/workflows/dict.yml
+        events=(push)
+        names=('bande-dict-*')
+        component=main
+        architectures=(all)
+        ;;
     kernel)
         workflow=.github/workflows/follow-debian.yml
         events=(schedule workflow_dispatch)
@@ -54,9 +63,10 @@ case $source_repo in
         component=main
         architectures=(amd64 arm64)
         ;;
-    *) fail "unknown repository $source_repo; the archive takes desktop, kernel and apps" ;;
+    *) fail "unknown repository $source_repo; the archive takes desktop, dict, kernel and apps" ;;
 esac
 repo=bande-linux/$source_repo
+[ "$source_repo" != dict ] || repo=bande-linux/desktop
 
 call() {
     curl -fsSL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
@@ -71,10 +81,13 @@ read -r event path ref sha owner < <(jq -r '[.event, .path, .head_branch, .head_
 [ "$path" = "$workflow" ] || fail "run $run is from $path, not $workflow"
 [ "$owner" = "$repo" ] || fail "run $run built $owner, not $repo"
 [[ " ${events[*]} " == *" $event "* ]] || fail "run $run was started by $event; $source_repo publishes from ${events[*]}"
-if [ "$source_repo" = desktop ] || [ "$source_repo" = apps ]; then
+if [ "$source_repo" != kernel ]; then
     tag=${ref#refs/tags/}
     if [ "$source_repo" = desktop ]; then
         [[ $tag =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || fail "run $run built $ref; the desktop publishes vX.Y.Z tags"
+        want_version=${BASH_REMATCH[1]}
+    elif [ "$source_repo" = dict ]; then
+        [[ $tag =~ ^dict-([0-9]{8})$ ]] || fail "run $run built $ref; the dictionary packs publish dict-YYYYMMDD tags"
         want_version=${BASH_REMATCH[1]}
     else
         [[ $tag =~ ^([a-z0-9][a-z0-9-]*)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]] ||
