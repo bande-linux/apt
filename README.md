@@ -9,7 +9,7 @@ Install instructions for users are on the site ([`site/index.html`](site/index.h
 
 ## The archive
 
-One suite, `rolling`, for Debian testing:
+One suite, `forky`, for Debian 14 (forky):
 
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
@@ -29,7 +29,7 @@ limit.
 
 `bande-archive-keyring` (the keys of [`conf/archive-key.asc`](conf/archive-key.asc) and an APT
 pin that lets the archive provide only `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` and
-`linux-*-apple-*`) and `bande-apt-source` (`rolling main`; its postinst adds `apple` in
+`linux-*-apple-*`) and `bande-apt-source` (`forky main`; its postinst adds `apple` in
 `bande-apple.sources` on Apple Silicon) are built by this repository,
 from [`packaging/`](packaging), with
 [`scripts/build-repository-packages.sh`](scripts/build-repository-packages.sh). No source
@@ -175,7 +175,7 @@ own. For up to ten minutes after a publish it can serve a new `InRelease` beside
 `Packages.xz`, or the other way round. The archive therefore follows Debian's by-hash layout:
 
 - `Release` carries `Acquire-By-Hash: yes`, and every index is also served at
-  `dists/rolling/<component>/binary-<arch>/by-hash/SHA256/<sha256>`. That path never changes
+  `dists/forky/<component>/binary-<arch>/by-hash/SHA256/<sha256>`. That path never changes
   content, so apt (and `find-runs.sh` and `rebuild.sh`) always get the index that the
   `InRelease` they hold names.
 - apt-ftparchive keeps the newest 3 generations (`By-Hash-Keep`) in each by-hash directory, so a
@@ -197,21 +197,29 @@ own. For up to ten minutes after a publish it can serve a new `InRelease` beside
 - **Bootstrap release:** when the repository packages reach a new version,
   [`scripts/bootstrap-release.sh`](scripts/bootstrap-release.sh) creates the GitHub release
   `apt-source-VERSION`, which users download in the first install step.
-- **Verify:** after each deploy, a `debian:testing` container on amd64 and on arm64 checks that
+- **Verify:** after each deploy, a `debian:forky` container on amd64 and on arm64 checks that
   the live `key.asc` is the archive key, installs `bande-archive-keyring` and `bande-apt-source`
   from the live archive, and updates through the source they install. When the archive
   carries a desktop, it waits until the site serves the version the build job put in, installs
   `bande-desktop`, checks that every installed `bande-*` package is built for the machine's
   architecture (or `all`) at that version, and starts the installed compositor headless. It
-  warns about any package `bande-desktop` recommends that neither the archive nor Debian testing
+  warns about any package `bande-desktop` recommends that neither the archive nor Debian forky
   has, such as a default app from `bande-linux/apps` that has not been released yet.
 
 ## First publish
 
 Nothing special: the first publish can come from any source, or from the repository packages
-alone. A site that serves neither `dists/rolling/InRelease` nor `key.asc` has never been
+alone. A site that serves neither `dists/forky/InRelease` nor `key.asc` has never been
 published, and [`scripts/rebuild.sh`](scripts/rebuild.sh) starts the archive. A site that
 serves `key.asc` but no `InRelease` is broken, and the publish refuses to build over it.
+
+## A new suite
+
+The suite is named after the Debian release it is built for (now `forky`, Debian 14). For the
+next one, set `Codename` and `Suite` in [`conf/distributions`](conf/distributions), the source
+in [`packaging/`](packaging), and name the old suite in `conf/previous-suite`: until the live
+site serves the new suite, a publish reads the archive from the old one and publishes it under
+the new name. Delete `conf/previous-suite` after that first publish.
 
 ## Signing keys
 

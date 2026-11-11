@@ -16,8 +16,8 @@ check "the same commit builds the same keyring" cmp "$scratch/a/bande-archive-ke
 check "and the same source package" cmp "$scratch/a/bande-apt-source_${version}_all.deb" "$scratch/b/bande-apt-source_${version}_all.deb"
 check "the keyring holds the archive keys" cmp <(gpg --batch --dearmor < "$root/conf/archive-key.asc") \
     <(file a bande-archive-keyring "$version" usr/share/keyrings/bande-archive-keyring.pgp)
-check "the source follows rolling main only" sh -c "$(declare -f file); scratch='$scratch'
-    file a bande-apt-source '$version' etc/apt/sources.list.d/bande.sources | grep -qx 'Suites: rolling' &&
+check "the source follows forky main only" sh -c "$(declare -f file); scratch='$scratch'
+    file a bande-apt-source '$version' etc/apt/sources.list.d/bande.sources | grep -qx 'Suites: forky' &&
     file a bande-apt-source '$version' etc/apt/sources.list.d/bande.sources | grep -qx 'Components: main'"
 check "it carries the apple source outside /etc" sh -c "$(declare -f file); scratch='$scratch'
     file a bande-apt-source '$version' usr/share/bande-apt-source/bande-apple.sources | grep -qx 'Components: apple' &&

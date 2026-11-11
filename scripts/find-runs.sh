@@ -64,32 +64,41 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 gpg --batch --quiet --dearmor < "$conf/archive-key.asc" > "$work/keyring.gpg"
 
-code=$("$here/fetch-fresh.sh" "$live" dists/rolling/InRelease "$work/InRelease") ||
-    fail "cannot fetch $live/dists/rolling/InRelease"
+# The suite, and the one it was renamed from (rebuild.sh reads that one while
+# the live site has no dists/<suite> yet).
+suite=$(awk '/^Codename: / { print $2; exit }' "$conf/distributions")
+previous=$(cat "$conf/previous-suite" 2>/dev/null || :)
+code=$("$here/fetch-fresh.sh" "$live" "dists/$suite/InRelease" "$work/InRelease") ||
+    fail "cannot fetch $live/dists/$suite/InRelease"
+if [ "$code" = 404 ] && [ -n "$previous" ]; then
+    code=$("$here/fetch-fresh.sh" "$live" "dists/$previous/InRelease" "$work/InRelease") ||
+        fail "cannot fetch $live/dists/$previous/InRelease"
+    [ "$code" = 404 ] || suite=$previous
+fi
 case $code in
     200)
         gpgv --quiet --keyring "$work/keyring.gpg" --output "$work/Release" "$work/InRelease" 2>/dev/null ||
-            fail "rolling/InRelease is not signed by the archive key"
+            fail "$suite/InRelease is not signed by the archive key"
         until=$(sed -n 's/^Valid-Until: //p' "$work/Release")
         if [ -z "$until" ]; then
             echo "resign none"
         else
-            seconds=$(date -d "$until" +%s) || fail "rolling/InRelease has an unreadable Valid-Until: $until"
+            seconds=$(date -d "$until" +%s) || fail "$suite/InRelease has an unreadable Valid-Until: $until"
             left=$((seconds - $(date +%s)))
             if [ "$left" -le 0 ]; then
-                echo "find-runs: warning: rolling/InRelease expired at $until; re-signing it, no new runs taken" >&2
+                echo "find-runs: warning: $suite/InRelease expired at $until; re-signing it, no new runs taken" >&2
                 echo "resign expired"
                 exit 0
             fi
             if [ "$left" -lt $((7 * 86400)) ]; then
                 echo "resign $(date -u -d "@$seconds" +%Y-%m-%dT%H:%MZ)"
             else
-                echo "find-runs: rolling/InRelease is valid until $until" >&2
+                echo "find-runs: $suite/InRelease is valid until $until" >&2
             fi
         fi
         ;;
     404) echo "find-runs: $live serves no archive yet" >&2 ;;
-    *) fail "$live/dists/rolling/InRelease answered HTTP $code" ;;
+    *) fail "$live/dists/$suite/InRelease answered HTTP $code" ;;
 esac
 
 # live_version COMPONENT ARCH PACKAGE: its version in the live archive, or
@@ -99,9 +108,9 @@ live_version() {
     [ -e "$work/Release" ] || return 0
     sha=$(awk -v p="$index" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 == p { print $1 }' "$work/Release")
     [ -n "$sha" ] || return 0
-    curl -fs --retry 3 -o "$work/index.xz" "$live/dists/rolling/$1/binary-$2/by-hash/SHA256/$sha" ||
-        fail "rolling/$index is listed but missing"
-    echo "$sha  $work/index.xz" | sha256sum -c --quiet - || fail "rolling/$index does not match Release"
+    curl -fs --retry 3 -o "$work/index.xz" "$live/dists/$suite/$1/binary-$2/by-hash/SHA256/$sha" ||
+        fail "$suite/$index is listed but missing"
+    echo "$sha  $work/index.xz" | sha256sum -c --quiet - || fail "$suite/$index does not match Release"
     xz -dc "$work/index.xz" | awk -v RS= -v p="$3" '$0 ~ "(^|\n)Package: " p "\n" {
         for (i = 1; i <= NF; i++) if ($i == "Version:") print $(i + 1)
     }' | head -1

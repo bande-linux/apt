@@ -8,15 +8,15 @@ make_conf "$conf"
 rebuild() { "$root/scripts/rebuild.sh" --conf "$conf" --cache "$scratch/cache" "$@"; }
 # listed SITE COMPONENT ARCH: the package=version pairs of one index.
 listed() {
-    local packages=$1/dists/rolling/$2/binary-$3/Packages
+    local packages=$1/dists/forky/$2/binary-$3/Packages
     [ -e "$packages" ] || { echo "$packages is missing" >&2; return 1; }
     grep -h '^Package:\|^Version:' "$packages" | paste - - | awk '{ print $2 "=" $4 }' | sort | tr '\n' ' '
 }
 # by_hash SITE PATH: the by-hash path of an index the site's Release lists.
 by_hash() {
     local sha
-    sha=$(awk -v p="$2" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 == p { print $1 }' "$1/dists/rolling/Release")
-    echo "$1/dists/rolling/${2%/*}/by-hash/SHA256/$sha"
+    sha=$(awk -v p="$2" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 == p { print $1 }' "$1/dists/forky/Release")
+    echo "$1/dists/forky/${2%/*}/by-hash/SHA256/$sha"
 }
 # stale SITE OLD: a copy of SITE that serves OLD's indexes under their names, as
 # the Pages CDN can for up to ten minutes after a publish.
@@ -24,7 +24,7 @@ stale() {
     local d
     d=$(mktemp -d -p "$scratch")
     cp -r "$1/." "$d/"
-    for f in "$2"/dists/rolling/*/binary-*/Packages*; do cp "$f" "$d/${f#"$2"/}"; done
+    for f in "$2"/dists/forky/*/binary-*/Packages*; do cp "$f" "$d/${f#"$2"/}"; done
     echo "$d"
 }
 has() { [[ " $(listed "$1" "$2" "$3")" == *" $4 "* ]]; }
@@ -61,20 +61,20 @@ check "a first desktop publish" rebuild --live "$(serve "$empty")" --add desktop
 check "main carries the build on amd64 and arm64" both "$scratch/site-1" main "bande-compositor=$d1"
 check "main carries the architecture-independent packages on both" both "$scratch/site-1" main "bande-desktop=$d1"
 check "main carries the repository packages" both "$scratch/site-1" main bande-apt-source=1.0
-check "apple starts empty" sh -c "[ -z \"\$(grep '^Package:' '$scratch/site-1/dists/rolling/apple/binary-arm64/Packages')\" ]"
+check "apple starts empty" sh -c "[ -z \"\$(grep '^Package:' '$scratch/site-1/dists/forky/apple/binary-arm64/Packages')\" ]"
 check "Release lists both components and architectures" sh -c \
-    "grep -q '^Components: main apple' '$scratch/site-1/dists/rolling/Release' && grep -q '^Architectures: amd64 arm64' '$scratch/site-1/dists/rolling/Release'"
+    "grep -q '^Components: main apple' '$scratch/site-1/dists/forky/Release' && grep -q '^Architectures: amd64 arm64' '$scratch/site-1/dists/forky/Release'"
 check "index carries the fingerprint" grep -q "$(gpg --with-colons --show-keys "$conf/archive-key.asc" | awk -F: '/^fpr/ { print $10; exit }')" "$scratch/site-1/index.html"
 check "key.asc is published" cmp "$conf/archive-key.asc" "$scratch/site-1/key.asc"
-check "Release sets Acquire-By-Hash" grep -qx 'Acquire-By-Hash: yes' "$scratch/site-1/dists/rolling/Release"
-check "every index is served by hash" cmp "$scratch/site-1/dists/rolling/main/binary-arm64/Packages.xz" \
+check "Release sets Acquire-By-Hash" grep -qx 'Acquire-By-Hash: yes' "$scratch/site-1/dists/forky/Release"
+check "every index is served by hash" cmp "$scratch/site-1/dists/forky/main/binary-arm64/Packages.xz" \
     "$(by_hash "$scratch/site-1" main/binary-arm64/Packages.xz)"
 
 kernel k1 7.2.12 7.2.12-1+bande1
 check "kernel publish" rebuild --live "$(serve "$scratch/site-1")" --add kernel:apple="$scratch/in-k1" --out "$scratch/site-k1"
 check "apple carries the kernel on arm64" has "$scratch/site-k1" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
 check "apple carries bande-os-apple" has "$scratch/site-k1" apple arm64 bande-os-apple=7.2.12-1+bande1
-check "apple stays empty on amd64" sh -c "[ -z \"\$(grep '^Package:' '$scratch/site-k1/dists/rolling/apple/binary-amd64/Packages')\" ]"
+check "apple stays empty on amd64" sh -c "[ -z \"\$(grep '^Package:' '$scratch/site-k1/dists/forky/apple/binary-amd64/Packages')\" ]"
 check "a kernel publish keeps main" diff <(listed "$scratch/site-1" main arm64) <(listed "$scratch/site-k1" main arm64)
 
 site=$scratch/site-k1
@@ -88,13 +88,22 @@ check "main dropped the previous build" lacks "$site" main amd64 bande-composito
 check "dropped files leave the pool" test ! -e "$site/pool/main/b/bande-compositor/bande-compositor_${d1}_arm64.deb"
 check "repository packages survive rebuilds" has "$site" main arm64 bande-archive-keyring=1.0
 check "desktop publishes keep the kernel" has "$site" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
-check "the previous generations' indexes stay by hash" sh -c "cmp '$scratch/site-3/dists/rolling/main/binary-amd64/Packages.xz' \
+check "the previous generations' indexes stay by hash" sh -c "cmp '$scratch/site-3/dists/forky/main/binary-amd64/Packages.xz' \
     '$(by_hash "$scratch/site-3" main/binary-amd64/Packages.xz | sed "s|site-3|site-4|")' &&
     test -e '$(by_hash "$scratch/site-2" main/binary-amd64/Packages | sed "s|site-2|site-4|")'"
 check "state/by-hash lists them" grep -q " main/binary-amd64/by-hash/SHA256/$(basename "$(by_hash "$scratch/site-2" main/binary-amd64/Packages.gz)")\$" "$site/state/by-hash"
 check "a publish over a stale index still reads the live one by hash" \
     rebuild --live "$(serve "$(stale "$site" "$scratch/site-3")")" --add desktop:main="$scratch/in-4" --out "$scratch/stale"
 check "and keeps the newest build" both "$scratch/stale" main bande-compositor=0.0.0+git20261030.4.bbbbbb4
+
+renamed=$scratch/renamed-live renamed_conf=$scratch/renamed-conf
+cp -a "$site" "$renamed" && mv "$renamed/dists/forky" "$renamed/dists/old"
+cp -a "$conf" "$renamed_conf" && echo old > "$renamed_conf/previous-suite"
+check "a renamed suite is read from the previous one" "$root/scripts/rebuild.sh" --conf "$renamed_conf" \
+    --cache "$scratch/cache" --live "$(serve "$renamed")" --add-each apt:main="$scratch/in-apt" --out "$scratch/renamed"
+check "and keeps its packages" both "$scratch/renamed" main bande-compositor=0.0.0+git20261030.4.bbbbbb4
+check "and its kernel" has "$scratch/renamed" apple arm64 bande-os-apple=7.2.12-1+bande1
+check "under the new suite only" sh -c "[ ! -e '$scratch/renamed/dists/old' ]"
 
 kernel k2 7.2.14 7.2.14-1+bande1
 check "a second kernel" rebuild --live "$(serve "$site")" --add kernel:apple="$scratch/in-k2" --out "$scratch/site-k2"
@@ -201,7 +210,7 @@ make_deb "$scratch/in-recommending" bande-compositor "$d6" amd64
 make_deb "$scratch/in-recommending" bande-compositor "$d6" arm64
 recommends=bande-weather make_deb "$scratch/in-recommending" bande-desktop "$d6" all
 check "a desktop that recommends an app is taken" rebuild --live "$apps_live" --add desktop:main="$scratch/in-recommending" --out "$scratch/recommending"
-check "the desktop recommends the app" sh -c "grep -A8 '^Package: bande-desktop' '$scratch/recommending/dists/rolling/main/binary-arm64/Packages' | grep -qx 'Recommends: bande-weather'"
+check "the desktop recommends the app" sh -c "grep -A8 '^Package: bande-desktop' '$scratch/recommending/dists/forky/main/binary-arm64/Packages' | grep -qx 'Recommends: bande-weather'"
 check "the app it recommends keeps its own version" both "$scratch/recommending" main "bande-weather=$a1"
 check "and stays the apps repository's" grep -qx 'bande-weather apps' "$scratch/recommending/state/owners"
 for arch in amd64 arm64; do make_deb "$scratch/in-apps-taken" bande-compositor 9.0.0+git20261101.9.ccccccc $arch; done
@@ -254,9 +263,9 @@ cp -r "$site/." "$big/"
 mv "$(by_hash "$big" main/binary-arm64/Packages.xz)" "$scratch/moved"
 refuses "an index missing by hash is refused" "is not served by hash" "$root/scripts/check-site.sh" "$big" "$conf/keyring.gpg"
 mv "$scratch/moved" "$(by_hash "$big" main/binary-arm64/Packages.xz)"
-echo x > "$big/dists/rolling/main/binary-arm64/by-hash/SHA256/$(printf '0%.0s' $(seq 64))"
+echo x > "$big/dists/forky/main/binary-arm64/by-hash/SHA256/$(printf '0%.0s' $(seq 64))"
 refuses "a by-hash file that does not match its name is refused" "does not match its name" "$root/scripts/check-site.sh" "$big" "$conf/keyring.gpg"
-rm "$big/dists/rolling/main/binary-arm64/by-hash/SHA256/$(printf '0%.0s' $(seq 64))"
+rm "$big/dists/forky/main/binary-arm64/by-hash/SHA256/$(printf '0%.0s' $(seq 64))"
 truncate -s 96M "$big/pool/huge.deb"
 refuses "an unlisted pool file is refused" "not listed" "$root/scripts/check-site.sh" "$big" "$conf/keyring.gpg"
 rm "$big/pool/huge.deb"
@@ -270,7 +279,7 @@ for i in $(seq 7); do truncate -s 90M "$big/filler-$i.bin"; done
 check "a site over 600 MB passes with a warning" sh -c "'$root/scripts/check-site.sh' '$big' '$conf/keyring.gpg' 2>&1 | grep -q 'warning: site is'"
 
 rm "$big"/filler-*.bin
-check "the rebuilt Release is valid 14 days" sh -c "test \$((\$(date -d \"\$(sed -n 's/^Valid-Until: //p' '$site/dists/rolling/Release')\" +%s) - \$(date +%s))) -gt \$((14 * 86400 - 3600))"
+check "the rebuilt Release is valid 14 days" sh -c "test \$((\$(date -d \"\$(sed -n 's/^Valid-Until: //p' '$site/dists/forky/Release')\" +%s) - \$(date +%s))) -gt \$((14 * 86400 - 3600))"
 set_valid_until "$big" "$conf"
 refuses "an InRelease without Valid-Until is refused" "has no Valid-Until" "$root/scripts/check-site.sh" "$big" "$conf/keyring.gpg"
 set_valid_until "$big" "$conf" '-1 minute'
@@ -298,7 +307,7 @@ EOF
 cat > "$lists/sources.d/bande.sources" <<EOF
 Types: deb
 URIs: $(serve "$(stale "$site" "$scratch/site-3")")
-Suites: rolling
+Suites: forky
 Components: main apple
 Signed-By: $lists/keyring.gpg
 EOF
@@ -353,11 +362,11 @@ refuses "packs that enhance no single package are refused" "not one package" reb
 cp "$conf/archive-key.asc" "$scratch/old-key.asc"
 add_archive_key "$conf"
 check "rotation: rebuild signs with old and new key" rebuild --live "$(serve "$site")" --add desktop:main="$scratch/in-4" --out "$scratch/rotated"
-check "rotation: InRelease carries two signatures" sh -c "[ \$(gpgv --keyring '$conf/keyring.gpg' '$scratch/rotated/dists/rolling/InRelease' 2>&1 | grep -c 'Good signature') = 2 ]"
+check "rotation: InRelease carries two signatures" sh -c "[ \$(gpgv --keyring '$conf/keyring.gpg' '$scratch/rotated/dists/forky/InRelease' 2>&1 | grep -c 'Good signature') = 2 ]"
 gpg --dearmor < "$scratch/old-key.asc" > "$scratch/old.gpg"
 gpg --dearmor < "$conf/new-key.asc" > "$scratch/new.gpg"
-check "rotation: apt with only the old key accepts it" sqv --keyring "$scratch/old.gpg" --output "$scratch/old.txt" --cleartext "$scratch/rotated/dists/rolling/InRelease"
-check "rotation: apt with only the new key accepts it" sqv --keyring "$scratch/new.gpg" --output "$scratch/new.txt" --cleartext "$scratch/rotated/dists/rolling/InRelease"
-refuses "apt with an unrelated key refuses it" "signature" sqv --keyring "$forged/keyring.gpg" --output "$scratch/forged.txt" --cleartext "$scratch/rotated/dists/rolling/InRelease"
+check "rotation: apt with only the old key accepts it" sqv --keyring "$scratch/old.gpg" --output "$scratch/old.txt" --cleartext "$scratch/rotated/dists/forky/InRelease"
+check "rotation: apt with only the new key accepts it" sqv --keyring "$scratch/new.gpg" --output "$scratch/new.txt" --cleartext "$scratch/rotated/dists/forky/InRelease"
+refuses "apt with an unrelated key refuses it" "signature" sqv --keyring "$forged/keyring.gpg" --output "$scratch/forged.txt" --cleartext "$scratch/rotated/dists/forky/InRelease"
 
 finish

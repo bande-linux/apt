@@ -219,7 +219,7 @@ for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop-2" $p 0.2
 "$root/scripts/rebuild.sh" --conf "$conf" --live "$live" --add desktop:main="$scratch/desktop-2" --out "$scratch/site-2" > /dev/null
 stale=$(mktemp -d -p "$scratch")
 cp -r "$scratch/site-2/." "$stale/"
-cp "$scratch/site/dists/rolling/main/binary-arm64/Packages.xz" "$stale/dists/rolling/main/binary-arm64/Packages.xz"
+cp "$scratch/site/dists/forky/main/binary-arm64/Packages.xz" "$stale/dists/forky/main/binary-arm64/Packages.xz"
 d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" api "$d"
 check "a stale Packages.xz beside a new InRelease resolves by hash" find_runs "$d/out" "$(serve "$stale")"
 check "the published desktop is not found again" test ! -s "$d/out"
@@ -229,7 +229,7 @@ check "the published desktop is not found again" test ! -s "$d/out"
 d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" api "$d"
 check "a fresh InRelease is no re-sign" find_runs "$d/out"
 check "nothing is printed for it" test ! -s "$d/out"
-check "it says how long it is valid" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'rolling/InRelease is valid until'"
+check "it says how long it is valid" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'forky/InRelease is valid until'"
 expiring=$(mktemp -d -p "$scratch")
 cp -r "$scratch/site/." "$expiring/"
 set_valid_until "$expiring" "$conf" '+3 days'
@@ -243,7 +243,7 @@ set_valid_until "$expiring" "$conf" '-1 hour'
 d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" api "$d"
 check "an expired InRelease starts a re-sign" find_runs "$d/out" "$(serve "$expiring")"
 check "and no new run is taken from it" diff <(echo "resign expired") "$d/out"
-check "it warns" sh -c "'$root/scripts/find-runs.sh' '$(serve "$expiring")' '$conf' 2>&1 | grep -q 'warning: rolling/InRelease expired at'"
+check "it warns" sh -c "'$root/scripts/find-runs.sh' '$(serve "$expiring")' '$conf' 2>&1 | grep -q 'warning: forky/InRelease expired at'"
 
 cached=$(mktemp -d -p "$scratch")
 cat > "$cached/server.py" <<'PY2'

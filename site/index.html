@@ -21,11 +21,11 @@ p code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
 <body>
 <main>
 <h1>Bande</h1>
-<p class="lead">APT repository for the Bande desktop on Debian testing, amd64 and arm64. One rolling
-suite: every tagged desktop release, and the Mac mini kernel as Debian testing moves.</p>
+<p class="lead">APT repository for the Bande desktop on Debian 14 (forky), amd64 and arm64. One suite,
+<code>forky</code>: every tagged desktop release, and the Mac mini kernel as Debian forky updates it.</p>
 
 <h2>Install</h2>
-<p>On Debian testing (packages here are built against testing and do not install on Debian 13).</p>
+<p>On Debian 14 (forky). The packages are built against forky and do not install on Debian 13 (trixie).</p>
 <p>1. Download the keyring and the source package from the latest GitHub release, and install both:</p>
 <pre><code>cd /tmp
 wget https://github.com/bande-linux/apt/releases/latest/download/bande-archive-keyring.deb \
@@ -34,7 +34,7 @@ sudo apt install ./bande-archive-keyring.deb ./bande-apt-source.deb</code></pre>
 <p>This adds <code>/etc/apt/sources.list.d/bande.sources</code>:</p>
 <pre><code>Types: deb
 URIs: https://bande-linux.github.io/apt
-Suites: rolling
+Suites: forky
 Components: main
 Signed-By: /usr/share/keyrings/bande-archive-keyring.pgp</code></pre>
 <p>On Apple Silicon it also adds <code>/etc/apt/sources.list.d/bande-apple.sources</code>, the

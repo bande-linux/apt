@@ -3,7 +3,7 @@
 #        build-repository-packages.sh --version
 # Builds bande-archive-keyring (the keys in conf/archive-key.asc and an APT pin
 # that lets the archive provide only Bande's packages) and bande-apt-source
-# (the rolling main source, and the apple source its postinst enables on Apple
+# (the forky main source, and the apple source its postinst enables on Apple
 # Silicon) from packaging/ into OUT_DIR. Their version is
 # 1.<commits that touched packaging/, the keys or this script>, so it rises
 # with every change, and the same commit builds the same packages.

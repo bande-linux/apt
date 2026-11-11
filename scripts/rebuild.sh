@@ -32,9 +32,14 @@
 # the next publish restores them from the live site. Mutable files (InRelease,
 # state) are read past the CDN with fetch-fresh.sh, indexes by hash.
 #
-# A site that serves neither dists/rolling/InRelease nor key.asc has never been
+# A site that serves neither dists/forky/InRelease nor key.asc has never been
 # published, and the archive starts empty. One that serves key.asc but no
 # InRelease is refused, so a broken site is never published over.
+#
+# conf/previous-suite names the suite the archive had before it was renamed
+# (a new Debian release): while the live site has no dists/<suite> yet, the
+# archive is read from dists/<previous> and published as <suite>. Delete the
+# file once a publish has served the new suite.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -87,6 +92,7 @@ field() {
     awk -v f="$1" 'index($0, f ": ") == 1 { sub("^" f ": ", ""); print; exit }' "$conf/distributions"
 }
 suite=$(field Codename)
+previous=$(cat "$conf/previous-suite" 2>/dev/null || :)
 components=$(field Components)
 architectures=$(field Architectures)
 for batch in "${batches[@]}"; do
@@ -122,8 +128,8 @@ fresh() {
 
 # live_index PATH SHA256 OUT: an index of the live Release, by hash.
 live_index() {
-    get "$live/dists/$suite/$(dirname "$1")/by-hash/SHA256/$2" "$3" || fail "$suite/$1 is listed but missing"
-    echo "$2  $3" | sha256sum -c --quiet - || fail "$suite/$1 does not match Release"
+    get "$live/dists/$live_suite/$(dirname "$1")/by-hash/SHA256/$2" "$3" || fail "$live_suite/$1 is listed but missing"
+    echo "$2  $3" | sha256sum -c --quiet - || fail "$live_suite/$1 does not match Release"
 }
 
 release_sha256() {
@@ -147,18 +153,21 @@ describe() {
 }
 
 : > "$work/rows"
-mkdir -p "$work/live/$suite"
-dist=$work/live/$suite
-if fresh "dists/$suite/InRelease" "$dist/InRelease"; then
+live_suite=$suite
+dist=$work/live
+mkdir -p "$dist"
+if fresh "dists/$suite/InRelease" "$dist/InRelease" ||
+    { [ -n "$previous" ] && fresh "dists/$previous/InRelease" "$dist/InRelease" && live_suite=$previous &&
+        echo "rebuild: $live serves no $suite yet; reading the archive from $previous"; }; then
     gpgv --quiet --keyring "$work/keyring.gpg" --output "$dist/Release" "$dist/InRelease" 2>/dev/null ||
-        fail "$suite/InRelease is not signed by the archive key"
+        fail "$live_suite/InRelease is not signed by the archive key"
     for c in $components; do
         for arch in $architectures; do
             index=$c/binary-$arch/Packages.xz
             sha=$(release_sha256 "$dist/Release" "$index")
             if [ -z "$sha" ]; then
                 # A component or architecture added since the last publish.
-                echo "rebuild: $suite/Release does not list $index yet; starting it empty"
+                echo "rebuild: $live_suite/Release does not list $index yet; starting it empty"
                 continue
             fi
             live_index "$index" "$sha" "$dist/$c-$arch.xz"
@@ -322,12 +331,12 @@ sort -k2,2 -u "$work/by-hash" | while read -r mtime path; do
     # A directory the archive no longer has keeps nothing.
     [ -d "$public/${path%/by-hash/*}" ] || continue
     mkdir -p "$(dirname "$dest")"
-    if ! get "$live/dists/$suite/$path" "$dest"; then
-        echo "rebuild: $suite/$path is gone from the live site; not keeping it"
+    if ! get "$live/dists/$live_suite/$path" "$dest"; then
+        echo "rebuild: $live_suite/$path is gone from the live site; not keeping it"
         rm -f "$dest"
         continue
     fi
-    echo "$sha  $dest" | sha256sum -c --quiet - || fail "$suite/$path does not match its name"
+    echo "$sha  $dest" | sha256sum -c --quiet - || fail "$live_suite/$path does not match its name"
     touch -d "@$mtime" "$dest"
 done
 
