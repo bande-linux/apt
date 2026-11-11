@@ -1,0 +1,32 @@
+name: suites
+
+# The Debian releases the archive supports, from conf/suites, for the producer repositories'
+# build matrices: jobs: suites: uses: bande-linux/apt/.github/workflows/suites.yml@main, then
+# matrix: suite: ${{ fromJSON(needs.suites.outputs.list) }}.
+on:
+  workflow_call:
+    outputs:
+      list:
+        description: The suites as a JSON array, e.g. ["forky"]
+        value: ${{ jobs.suites.outputs.list }}
+
+permissions: {}
+
+jobs:
+  suites:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      list: ${{ steps.read.outputs.list }}
+    steps:
+      - name: Read conf/suites
+        id: read
+        run: |
+          curl -fsSL --retry 3 -o suites https://raw.githubusercontent.com/bande-linux/apt/main/conf/suites
+          if grep -vqE '^[a-z]+$' suites || [ ! -s suites ]; then
+            echo "::error::conf/suites must list Debian codenames, one per line"
+            exit 1
+          fi
+          list=$(jq -Rnc '[inputs]' < suites)
+          echo "Suites: $list"
+          echo "list=$list" >> "$GITHUB_OUTPUT"
