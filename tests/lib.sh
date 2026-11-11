@@ -47,7 +47,7 @@ make_conf() {
     export GNUPGHOME=$conf/gnupg
     mkdir -p "$GNUPGHOME"
     chmod 700 "$GNUPGHOME"
-    cp "$root"/conf/{options,distributions} "$conf/"
+    cp "$root"/conf/{options,distribution.in,suites} "$conf/"
     gpg --batch --quiet --passphrase '' --quick-generate-key 'Bande test archive key' ed25519 cert never
     primary=$(gpg --with-colons --list-keys | awk -F: '/^fpr/ { print $10; exit }')
     gpg --batch --quiet --passphrase '' --quick-add-key "$primary" ed25519 sign "$expiry"
@@ -92,11 +92,11 @@ serve() {
     echo "http://127.0.0.1:$port"
 }
 
-# set_valid_until SITE CONF [DATE]: rewrites the Valid-Until of SITE's Release to
-# DATE (date -d syntax), or drops it without DATE, and signs it again with CONF's
-# keys, as a publish would have.
+# set_valid_until SITE CONF [DATE]: rewrites the Valid-Until of SITE's Release
+# (of $suite, default forky) to DATE (date -d syntax), or drops it without DATE,
+# and signs it again with CONF's keys, as a publish would have.
 set_valid_until() {
-    local dist=$1/dists/forky conf=$2 signers=()
+    local dist=$1/dists/${suite:-forky} conf=$2 signers=()
     sed -i '/^Valid-Until: /d' "$dist/Release"
     if [ $# -gt 2 ]; then
         sed -i "/^Date: /a Valid-Until: $(LC_ALL=C date -u -d "$3" '+%a, %d %b %Y %H:%M:%S UTC')" "$dist/Release"

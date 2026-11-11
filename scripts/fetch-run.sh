@@ -1,37 +1,43 @@
 #!/bin/bash
-# Usage: fetch-run.sh REPO RUN_ID OUT_DIR
+# Usage: fetch-run.sh REPO RUN_ID OUT_DIR [CONF_DIR]
 # Verifies a CI run of bande-linux/REPO (desktop, dict, l10n, kernel, web, apps or
 # apps-l10n): the repository's release workflow, finished green, its commit on main.
+# Every package built for a suite carries the suite's ~debNN (suites.sh) right
+# after its release version, written ~debNN below:
 # - desktop: the push of a vX.Y.Z tag that points at the run's commit; its
-#   packages carry X.Y.Z.
+#   packages carry X.Y.Z~debNN.
 # - dict: the desktop's dict.yml push of a dict-YYYYMMDD tag that points at
-#   the run's commit; it carries bande-dict-* packages alone, at YYYYMMDD.
+#   the run's commit; it carries bande-dict-* packages alone, at YYYYMMDD~debNN.
 # - l10n: the desktop's l10n.yml push of an l10n-YYYYMMDD[.N] tag that points at
 #   the run's commit; it carries bande-desktop-l10n-* packs alone, each at
-#   RELEASE+l10nYYYYMMDD[.N], where vRELEASE is a desktop tag on the run's commit's
-#   history.
-# - kernel and web: a schedule or dispatch on main, naming its version with one
-#   bande-version-VERSION artifact, which its packages carry.
+#   RELEASE~debNN+l10nYYYYMMDD[.N], where vRELEASE is a desktop tag on the run's
+#   commit's history.
+# - kernel and web: a schedule or dispatch on main, naming its base version
+#   with one bande-version-VERSION artifact; its packages carry VERSION~debNN.
 # - apps: the push of an <app>-vX.Y.Z tag that points at the run's commit, for
-#   an apps/<app> at that commit; it carries bande-<app> alone, at X.Y.Z, never
-#   a name of the desktop's, and its packs bande-<app>-l10n-*, architecture all,
-#   in each architecture's artifact. Dispatch runs are test builds and never
-#   published.
+#   an apps/<app> at that commit; it carries bande-<app> alone, at X.Y.Z~debNN,
+#   never a name of the desktop's, and its packs bande-<app>-l10n-*,
+#   architecture all, in each architecture's artifact. Dispatch runs are test
+#   builds and never published.
 # - apps-l10n: the apps' l10n.yml push of an l10n-YYYYMMDD[.N] tag that points at
 #   the run's commit; it carries bande-<app>-l10n-* packs alone, for apps/<app>
-#   at that commit, each at RELEASE+l10nYYYYMMDD[.N], where <app>-vRELEASE is a
-#   tag on the run's commit's history.
-# Then downloads its bande-debs-ARCH artifacts into OUT_DIR and checks that they
-# carry only the repository's own package names, every architecture it builds
-# and the same packages for each. A package OUT_DIR already holds at a newer
-# version is left, so several apps runs merge. Prints component= and appends it
-# to $GITHUB_OUTPUT when set. Needs GH_TOKEN; the repositories are public.
+#   at that commit, each at RELEASE~debNN+l10nYYYYMMDD[.N], where <app>-vRELEASE
+#   is a tag on the run's commit's history.
+# Then, for each suite in CONF_DIR/suites (default conf/), downloads its
+# bande-debs-SUITE-ARCH artifacts into OUT_DIR/SUITE and checks that they carry
+# only the repository's own package names, every architecture it builds and
+# the same packages for each. A run without any artifact of a suite (built
+# before the suite was listed) leaves that suite alone; it must carry at least
+# one. A package OUT_DIR already holds at a newer version is left, so several
+# apps runs merge. Prints component= and appends it to $GITHUB_OUTPUT when set.
+# Needs GH_TOKEN; the repositories are public.
 #
 # A run given by hand may still be going; this waits up to $FETCH_RUN_WAIT
 # seconds (default 900) for it to end.
 set -euo pipefail
 
-source_repo=$1 run=$2 out=$3 stamp=""
+here=$(cd "$(dirname "$0")" && pwd)
+source_repo=$1 run=$2 out=$3 conf=${4:-$here/../conf} stamp=""
 api=${GITHUB_API_URL:-https://api.github.com}
 wait_limit=${FETCH_RUN_WAIT:-900}
 poll=${FETCH_RUN_POLL:-15}
@@ -41,6 +47,13 @@ repository_packages=" bande-archive-keyring bande-apt-source "
 # desktop's packaging/ directories are added from its main branch.
 reserved=" xdg-desktop-portal-bande libpam-bande-secrets bande-desktop bande-os-apple bande-browser "
 fail() { echo "fetch-run: $*" >&2; exit 1; }
+# shellcheck source=scripts/suites.sh
+. "$here/suites.sh"
+suites=$(suite_list "$conf") || fail "conf/suites is not usable"
+# Temporary, until the kernel repository builds per suite: its runs upload the
+# unsuffixed bande-debs-ARCH artifacts, whose packages carry the base version
+# (or base~deb14), and feed forky alone.
+kernel_suite=forky
 
 # Per repository: its workflow, the events it publishes from, the package names
 # it may publish, the component they go to, the architectures it must build
@@ -177,12 +190,13 @@ if [ "$source_repo" = apps ] || [ "$source_repo" = apps-l10n ]; then
         fail "cannot list the desktop's packaging/"
     reserved+="$(jq -r '.[] | select(.type == "dir") | .name' "$work/packaging.json" | tr '\n' ' ')"
 fi
-# l10n_version PACKAGE VERSION: a pack of an l10n tag carries RELEASE+l10n$stamp,
-# where the release tag of the program it translates is on the run's history.
+# l10n_version PACKAGE VERSION NUMBER: a pack of an l10n tag carries
+# RELEASE~debNUMBER+l10n$stamp, where the release tag of the program it
+# translates is on the run's history.
 l10n_version() {
-    local package=$1 version=$2 app release tag_name status
-    [[ $version =~ ^([0-9]+\.[0-9]+\.[0-9]+)\+l10n([0-9.]+)$ ]] && [ "${BASH_REMATCH[2]}" = "$stamp" ] ||
-        fail "$package carries version $version, not RELEASE+l10n$stamp"
+    local package=$1 version=$2 number=$3 app release tag_name status
+    [[ $version =~ ^([0-9]+\.[0-9]+\.[0-9]+)~deb$number\+l10n([0-9.]+)$ ]] && [ "${BASH_REMATCH[2]}" = "$stamp" ] ||
+        fail "$package carries version $version, not RELEASE~deb$number+l10n$stamp"
     release=${BASH_REMATCH[1]}
     if [ "$source_repo" = l10n ]; then
         tag_name=v$release
@@ -202,69 +216,99 @@ l10n_version() {
         esac
     fi
 }
-mkdir -p "$out" "$work/stage"
-: > "$work/names"
-shopt -s nullglob
-for arch in "${architectures[@]}"; do
-    name=bande-debs-$arch
-    id=$(jq -r --arg n "$name" '[.artifacts[] | select(.name == $n)] | if length == 1 then .[0].id else "" end' \
-        "$work/artifacts.json")
-    [ -n "$id" ] || fail "run $run has no single $name artifact"
-    call "$api/repos/$repo/actions/artifacts/$id/zip" > "$work/$name.zip" || fail "cannot download $name"
-    mkdir "$work/$name"
-    unzip -q -j "$work/$name.zip" '*.deb' -d "$work/$name" 2> /dev/null || fail "$name holds no packages"
-    for deb in "$work/$name"/*.deb; do
-        read -r package version deb_arch < <(dpkg-deb --show --showformat="\${Package} \${Version} \${Architecture}\n" "$deb")
-        [ "$deb_arch" = "$arch" ] || { [ "$source_repo" = apps ] && [ "$deb_arch" = all ] && [[ $package == *-l10n-* ]]; } ||
-            fail "$name holds $package for $deb_arch"
-        allowed=0
-        for pattern in "${names[@]}"; do
-            # shellcheck disable=SC2053 # the names are glob patterns
-            [[ $package != $pattern ]] || allowed=1
-        done
-        [ "$allowed" = 1 ] || fail "$(basename "$deb") is $package, which $source_repo does not publish"
-        [[ $repository_packages != *" $package "* ]] || fail "$package is built by apt itself; $source_repo may not publish it"
-        if [ "$source_repo" = apps ]; then
-            [[ $reserved != *" $package "* ]] || fail "$package is the desktop's; an app may not take it"
-        fi
-        if [ -n "${stamp:-}" ]; then
-            l10n_version "$package" "$version"
-        elif [ "$version" != "$want_version" ]; then
-            fail "$package carries version $version, the run publishes $want_version"
-        fi
-        echo "$arch $package $version" >> "$work/names"
-        mv "$deb" "$work/stage/"
-    done
-done
 
-# Every architecture-specific package must be built for every architecture, or
-# machines of the one that lacks it would be left with a mismatched set.
-expected='' first=''
-for arch in "${architectures[@]}"; do
-    [ "$arch" != all ] || continue
-    got=$(awk -v a="$arch" '$1 == a { print $2 }' "$work/names" | sort -u | tr '\n' ' ')
-    if [ -n "$first" ] && [ "$got" != "$expected" ]; then
-        fail "incomplete architecture: $first carries [${expected% }], $arch carries [${got% }]"
+# fetch_suite SUITE: SUITE's artifacts of the run, checked, into $work/stage/SUITE.
+fetch_suite() {
+    local suite=$1 number arch name id deb package version deb_arch allowed pattern expected first got split
+    number=$(suite_number "$suite")
+    mkdir -p "$work/stage/$suite"
+    : > "$work/names"
+    for arch in "${architectures[@]}"; do
+        name=$prefix$arch
+        id=$(jq -r --arg n "$name" '[.artifacts[] | select(.name == $n)] | if length == 1 then .[0].id else "" end' \
+            "$work/artifacts.json")
+        [ -n "$id" ] || fail "run $run has no single $name artifact"
+        call "$api/repos/$repo/actions/artifacts/$id/zip" > "$work/$name.zip" || fail "cannot download $name"
+        mkdir "$work/$name"
+        unzip -q -j "$work/$name.zip" '*.deb' -d "$work/$name" 2> /dev/null || fail "$name holds no packages"
+        for deb in "$work/$name"/*.deb; do
+            read -r package version deb_arch < <(dpkg-deb --show --showformat="\${Package} \${Version} \${Architecture}\n" "$deb")
+            [ "$deb_arch" = "$arch" ] || { [ "$source_repo" = apps ] && [ "$deb_arch" = all ] && [[ $package == *-l10n-* ]]; } ||
+                fail "$name holds $package for $deb_arch"
+            allowed=0
+            for pattern in "${names[@]}"; do
+                # shellcheck disable=SC2053 # the names are glob patterns
+                [[ $package != $pattern ]] || allowed=1
+            done
+            [ "$allowed" = 1 ] || fail "$(basename "$deb") is $package, which $source_repo does not publish"
+            [[ $repository_packages != *" $package "* ]] || fail "$package is built by apt itself; $source_repo may not publish it"
+            if [ "$source_repo" = apps ]; then
+                [[ $reserved != *" $package "* ]] || fail "$package is the desktop's; an app may not take it"
+            fi
+            if [ -n "${stamp:-}" ]; then
+                l10n_version "$package" "$version" "$number"
+            elif [ "$source_repo" = kernel ] && [ "$version" = "$want_version" ]; then
+                : # Temporary: the kernel builds without the suffix yet.
+            elif [ "$version" != "$want_version~deb$number" ]; then
+                fail "$package carries version $version, the run publishes $want_version~deb$number for $suite"
+            fi
+            echo "$arch $package $version" >> "$work/names"
+            mv "$deb" "$work/stage/$suite/"
+        done
+    done
+
+    # Every architecture-specific package must be built for every architecture, or
+    # machines of the one that lacks it would be left with a mismatched set.
+    expected='' first=''
+    for arch in "${architectures[@]}"; do
+        [ "$arch" != all ] || continue
+        got=$(awk -v a="$arch" '$1 == a { print $2 }' "$work/names" | sort -u | tr '\n' ' ')
+        if [ -n "$first" ] && [ "$got" != "$expected" ]; then
+            fail "incomplete architecture in $suite: $first carries [${expected% }], $arch carries [${got% }]"
+        fi
+        first=${first:-$arch} expected=$got
+    done
+    split=$(awk '$1 != "all" { print $2, $3 }' "$work/names" | sort -u | awk '{ print $1 }' | uniq -d)
+    [ -z "$split" ] || fail "packages built at different versions per architecture in $suite: $(tr '\n' ' ' <<< "$split")"
+}
+
+mkdir -p "$out" "$work/stage"
+shopt -s nullglob
+fetched=''
+for suite in $suites; do
+    if [ "$source_repo" = kernel ]; then
+        [ "$suite" = "$kernel_suite" ] || continue
+        prefix=bande-debs-
+    else
+        prefix=bande-debs-$suite-
+        # A run built before the suite was listed leaves it as it is.
+        if ! jq -e --arg p "$prefix" 'any(.artifacts[]; .name | startswith($p))' "$work/artifacts.json" > /dev/null; then
+            echo "fetch-run: run $run built nothing for $suite; it stays as it is" >&2
+            continue
+        fi
     fi
-    first=${first:-$arch} expected=$got
+    fetch_suite "$suite"
+    fetched+=" $suite"
 done
-split=$(awk '$1 != "all" { print $2, $3 }' "$work/names" | sort -u | awk '{ print $1 }' | uniq -d)
-[ -z "$split" ] || fail "packages built at different versions per architecture: $(tr '\n' ' ' <<< "$split")"
+[ -n "$fetched" ] || fail "run $run has no bande-debs-SUITE-ARCH artifacts for any suite of conf/suites: ${suites//$'\n'/ }"
 
 describe() { dpkg-deb --show --showformat="\${Package} \${Architecture} \${Version}\n" "$1"; }
-for deb in "$work/stage"/*.deb; do
-    read -r package arch version < <(describe "$deb")
-    keep=1
-    for held in "$out"/*.deb; do
-        read -r held_package held_arch held_version < <(describe "$held")
-        [ "$held_package $held_arch" = "$package $arch" ] || continue
-        if dpkg --compare-versions "$version" gt "$held_version"; then
-            rm "$held"
-        else
-            keep=0
-        fi
+for suite in $fetched; do
+    mkdir -p "$out/$suite"
+    for deb in "$work/stage/$suite"/*.deb; do
+        read -r package arch version < <(describe "$deb")
+        keep=1
+        for held in "$out/$suite"/*.deb; do
+            read -r held_package held_arch held_version < <(describe "$held")
+            [ "$held_package $held_arch" = "$package $arch" ] || continue
+            if dpkg --compare-versions "$version" gt "$held_version"; then
+                rm "$held"
+            else
+                keep=0
+            fi
+        done
+        if [ "$keep" = 1 ]; then mv "$deb" "$out/$suite/"; fi
     done
-    if [ "$keep" = 1 ]; then mv "$deb" "$out/"; fi
 done
 
 echo "component=$component"

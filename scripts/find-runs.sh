@@ -1,10 +1,12 @@
 #!/bin/bash
 # Usage: find-runs.sh LIVE_URL [CONF_DIR]
 # Prints "REPO RUN_ID" for each source run newer than what the live, signature-
-# checked archive serves, one per line, nothing when all is published:
+# checked archive serves, one per line, nothing when all is published. A live
+# version is the newest of the package's across the suites in conf/suites,
+# compared without the suite's ~debNN, as the tags name the release alone:
 # - apt: "apt VERSION" when $APT_VERSION, the version of the keyring and source
 #   packages this repository builds, is newer than the live
-#   bande-archive-keyring's;
+#   bande-archive-keyring's in any suite (a new suite has none);
 # - desktop: the green release.yml push of the highest vX.Y.Z tag, whose
 #   version is the tag; the live one is bande-desktop's in main;
 # - dict: the green dict.yml push of the desktop's highest dict-YYYYMMDD tag,
@@ -22,10 +24,11 @@
 #   state/processed holds the run. It waits while a release tag on the run's
 #   history is newer than what the archive serves or this publish takes, since
 #   its packs are built on that release (rebuild.sh --add-l10n).
-# - resign: "resign VALID_UNTIL" when the live InRelease has fewer than 7 days
-#   left before its Valid-Until, or none. An InRelease past it may be an old one
-#   replayed: it is no base for new runs, so only "resign expired" is printed,
-#   and the publish re-signs the archive from its verified signature.
+# - resign: "resign VALID_UNTIL" when a suite's live InRelease has fewer than 7
+#   days left before its Valid-Until (the earliest), or none. An InRelease past
+#   it may be an old one replayed: it is no base for new runs, so only "resign
+#   expired" is printed, and the publish re-signs the archive from its verified
+#   signature.
 # InRelease and state/processed are read past the Pages CDN (fetch-fresh.sh),
 # and the indexes by hash, so a publish in progress cannot mix generations.
 # fetch-run.sh checks each printed run in full. Needs GH_TOKEN; both
@@ -64,63 +67,83 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 gpg --batch --quiet --dearmor < "$conf/archive-key.asc" > "$work/keyring.gpg"
 
-# The suite, and the one it was renamed from (rebuild.sh reads that one while
-# the live site has no dists/<suite> yet).
-suite=$(awk '/^Codename: / { print $2; exit }' "$conf/distributions")
-previous=$(cat "$conf/previous-suite" 2>/dev/null || :)
-code=$("$here/fetch-fresh.sh" "$live" "dists/$suite/InRelease" "$work/InRelease") ||
-    fail "cannot fetch $live/dists/$suite/InRelease"
-if [ "$code" = 404 ] && [ -n "$previous" ]; then
-    code=$("$here/fetch-fresh.sh" "$live" "dists/$previous/InRelease" "$work/InRelease") ||
-        fail "cannot fetch $live/dists/$previous/InRelease"
-    [ "$code" = 404 ] || suite=$previous
+# shellcheck source=scripts/suites.sh
+. "$here/suites.sh"
+suites=$(suite_list "$conf") || fail "conf/suites is not usable"
+resign='' resign_seconds='' live_suites=''
+for suite in $suites; do
+    code=$("$here/fetch-fresh.sh" "$live" "dists/$suite/InRelease" "$work/$suite.InRelease") ||
+        fail "cannot fetch $live/dists/$suite/InRelease"
+    case $code in
+        200) ;;
+        404) echo "find-runs: $live serves no $suite yet" >&2; continue ;;
+        *) fail "$live/dists/$suite/InRelease answered HTTP $code" ;;
+    esac
+    gpgv --quiet --keyring "$work/keyring.gpg" --output "$work/$suite.Release" "$work/$suite.InRelease" 2>/dev/null ||
+        fail "$suite/InRelease is not signed by the archive key"
+    live_suites+=" $suite"
+    until=$(sed -n 's/^Valid-Until: //p' "$work/$suite.Release")
+    if [ -z "$until" ]; then
+        resign=${resign:-none}
+        continue
+    fi
+    seconds=$(date -d "$until" +%s) || fail "$suite/InRelease has an unreadable Valid-Until: $until"
+    left=$((seconds - $(date +%s)))
+    if [ "$left" -le 0 ]; then
+        echo "find-runs: warning: $suite/InRelease expired at $until; re-signing it, no new runs taken" >&2
+        echo "resign expired"
+        exit 0
+    fi
+    if [ "$left" -lt $((7 * 86400)) ]; then
+        if [ -z "$resign_seconds" ] || [ "$seconds" -lt "$resign_seconds" ]; then resign_seconds=$seconds; fi
+    else
+        echo "find-runs: $suite/InRelease is valid until $until" >&2
+    fi
+done
+if [ "$resign" = none ]; then
+    echo "resign none"
+elif [ -n "$resign_seconds" ]; then
+    echo "resign $(date -u -d "@$resign_seconds" +%Y-%m-%dT%H:%MZ)"
 fi
-case $code in
-    200)
-        gpgv --quiet --keyring "$work/keyring.gpg" --output "$work/Release" "$work/InRelease" 2>/dev/null ||
-            fail "$suite/InRelease is not signed by the archive key"
-        until=$(sed -n 's/^Valid-Until: //p' "$work/Release")
-        if [ -z "$until" ]; then
-            echo "resign none"
-        else
-            seconds=$(date -d "$until" +%s) || fail "$suite/InRelease has an unreadable Valid-Until: $until"
-            left=$((seconds - $(date +%s)))
-            if [ "$left" -le 0 ]; then
-                echo "find-runs: warning: $suite/InRelease expired at $until; re-signing it, no new runs taken" >&2
-                echo "resign expired"
-                exit 0
-            fi
-            if [ "$left" -lt $((7 * 86400)) ]; then
-                echo "resign $(date -u -d "@$seconds" +%Y-%m-%dT%H:%MZ)"
-            else
-                echo "find-runs: $suite/InRelease is valid until $until" >&2
-            fi
-        fi
-        ;;
-    404) echo "find-runs: $live serves no archive yet" >&2 ;;
-    *) fail "$live/dists/$suite/InRelease answered HTTP $code" ;;
-esac
+[ -n "$live_suites" ] || echo "find-runs: $live serves no archive yet" >&2
 
-# live_version COMPONENT ARCH PACKAGE: its version in the live archive, or
-# nothing when the archive, the index or the package is missing.
-live_version() {
-    local index=$1/binary-$2/Packages.xz sha
-    [ -e "$work/Release" ] || return 0
-    sha=$(awk -v p="$index" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 == p { print $1 }' "$work/Release")
+# suite_version SUITE COMPONENT ARCH PACKAGE: its version in the live SUITE,
+# or nothing when the suite, the index or the package is missing.
+suite_version() {
+    local suite=$1 index=$2/binary-$3/Packages.xz sha
+    [ -e "$work/$suite.Release" ] || return 0
+    sha=$(awk -v p="$index" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 == p { print $1 }' "$work/$suite.Release")
     [ -n "$sha" ] || return 0
-    curl -fs --retry 3 -o "$work/index.xz" "$live/dists/$suite/$1/binary-$2/by-hash/SHA256/$sha" ||
+    curl -fs --retry 3 -o "$work/index.xz" "$live/dists/$suite/$2/binary-$3/by-hash/SHA256/$sha" ||
         fail "$suite/$index is listed but missing"
     echo "$sha  $work/index.xz" | sha256sum -c --quiet - || fail "$suite/$index does not match Release"
-    xz -dc "$work/index.xz" | awk -v RS= -v p="$3" '$0 ~ "(^|\n)Package: " p "\n" {
+    xz -dc "$work/index.xz" | awk -v RS= -v p="$4" '$0 ~ "(^|\n)Package: " p "\n" {
         for (i = 1; i <= NF; i++) if ($i == "Version:") print $(i + 1)
     }' | head -1
 }
 
+# live_version COMPONENT ARCH PACKAGE: the newest of its versions across the
+# live suites, each without its suite's ~debNN; nothing when none has it.
+live_version() {
+    local suite version best=''
+    for suite in $live_suites; do
+        version=$(suite_version "$suite" "$@")
+        [ -n "$version" ] || continue
+        version=$(release_part "$suite" "$version")
+        if [ -z "$best" ] || dpkg --compare-versions "$version" gt "$best"; then best=$version; fi
+    done
+    echo "$best"
+}
+
 newer() { [ -z "$2" ] || dpkg --compare-versions "$1" gt "$2"; }
 
+# The keyring carries no suffix; every suite must have it at $APT_VERSION.
 if [ -n "${APT_VERSION:-}" ]; then
-    served=$(live_version main arm64 bande-archive-keyring)
-    if newer "$APT_VERSION" "$served"; then
+    behind=''
+    for suite in $suites; do
+        if newer "$APT_VERSION" "$(suite_version "$suite" main arm64 bande-archive-keyring)"; then behind+=" $suite"; fi
+    done
+    if [ -n "$behind" ]; then
         echo "apt $APT_VERSION"
     else
         echo "find-runs: the repository packages $APT_VERSION are published" >&2
@@ -201,7 +224,7 @@ follow_debian kernel apple bande-os-apple
 follow_debian web main bande-browser
 
 : > "$work/processed"
-if [ -e "$work/Release" ]; then
+if [ -n "$live_suites" ]; then
     code=$("$here/fetch-fresh.sh" "$live" state/processed "$work/processed") ||
         fail "cannot fetch $live/state/processed"
     case $code in

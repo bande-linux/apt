@@ -1,8 +1,0 @@
-Origin: Bande
-Label: Bande
-Codename: forky
-Suite: forky
-Architectures: amd64 arm64
-Components: main apple
-Description: Bande for Debian 14 (forky): the desktop (main) and the Mac mini kernel (apple), every green build
-DebIndices: Packages Release . .gz .xz

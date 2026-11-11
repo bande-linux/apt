@@ -6,17 +6,17 @@ host_arch=$(dpkg --print-architecture)
 conf=$scratch/conf
 make_conf "$conf"
 rebuild() { "$root/scripts/rebuild.sh" --conf "$conf" --cache "$scratch/cache" "$@"; }
-# listed SITE COMPONENT ARCH: the package=version pairs of one index.
+# listed SITE COMPONENT ARCH [SUITE]: the package=version pairs of one index.
 listed() {
-    local packages=$1/dists/forky/$2/binary-$3/Packages
+    local packages=$1/dists/${4:-forky}/$2/binary-$3/Packages
     [ -e "$packages" ] || { echo "$packages is missing" >&2; return 1; }
     grep -h '^Package:\|^Version:' "$packages" | paste - - | awk '{ print $2 "=" $4 }' | sort | tr '\n' ' '
 }
-# by_hash SITE PATH: the by-hash path of an index the site's Release lists.
+# by_hash SITE PATH [SUITE]: the by-hash path of an index the site's Release lists.
 by_hash() {
-    local sha
-    sha=$(awk -v p="$2" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 == p { print $1 }' "$1/dists/forky/Release")
-    echo "$1/dists/forky/${2%/*}/by-hash/SHA256/$sha"
+    local sha dist=$1/dists/${3:-forky}
+    sha=$(awk -v p="$2" '/^SHA256:/ { f = 1; next } /^[^ ]/ { f = 0 } f && $3 == p { print $1 }' "$dist/Release")
+    echo "$dist/${2%/*}/by-hash/SHA256/$sha"
 }
 # stale SITE OLD: a copy of SITE that serves OLD's indexes under their names, as
 # the Pages CDN can for up to ten minutes after a publish.
@@ -27,18 +27,19 @@ stale() {
     for f in "$2"/dists/forky/*/binary-*/Packages*; do cp "$f" "$d/${f#"$2"/}"; done
     echo "$d"
 }
-has() { [[ " $(listed "$1" "$2" "$3")" == *" $4 "* ]]; }
+# has SITE COMPONENT ARCH PACKAGE=VERSION [SUITE]
+has() { [[ " $(listed "$1" "$2" "$3" "${5:-forky}")" == *" $4 "* ]]; }
 lacks() { ! has "$@"; }
-both() { has "$1" "$2" amd64 "$3" && has "$1" "$2" arm64 "$3"; }
+both() { has "$1" "$2" amd64 "$3" "${4:-forky}" && has "$1" "$2" arm64 "$3" "${4:-forky}"; }
 desktop() {
-    make_deb "$scratch/in-$1" bande-compositor "$2" amd64
-    make_deb "$scratch/in-$1" bande-compositor "$2" arm64
-    make_deb "$scratch/in-$1" bande-desktop "$2" all
+    make_deb "$scratch/in-$1/forky" bande-compositor "$2" amd64
+    make_deb "$scratch/in-$1/forky" bande-compositor "$2" arm64
+    make_deb "$scratch/in-$1/forky" bande-desktop "$2" all
 }
 kernel() {
-    make_deb "$scratch/in-$1" "linux-image-$2-apple-arm64-16k" "$3" arm64
-    make_deb "$scratch/in-$1" linux-image-apple-arm64-16k "$3" arm64
-    make_deb "$scratch/in-$1" bande-os-apple "$3" arm64
+    make_deb "$scratch/in-$1/forky" "linux-image-$2-apple-arm64-16k" "$3" arm64
+    make_deb "$scratch/in-$1/forky" linux-image-apple-arm64-16k "$3" arm64
+    make_deb "$scratch/in-$1/forky" bande-os-apple "$3" arm64
 }
 d1=0.0.0+git20261029.1.aaaaaaa
 
@@ -60,7 +61,7 @@ check "a first desktop publish" rebuild --live "$(serve "$empty")" --add desktop
     --add-each apt:main="$scratch/in-apt" --out "$scratch/site-1"
 check "main carries the build on amd64 and arm64" both "$scratch/site-1" main "bande-compositor=$d1"
 check "main carries the architecture-independent packages on both" both "$scratch/site-1" main "bande-desktop=$d1"
-check "main carries the repository packages" both "$scratch/site-1" main bande-apt-source=1.0
+check "main carries the repository packages" both "$scratch/site-1" main bande-apt-source=1.0~deb14
 check "apple starts empty" sh -c "[ -z \"\$(grep '^Package:' '$scratch/site-1/dists/forky/apple/binary-arm64/Packages')\" ]"
 check "Release lists both components and architectures" sh -c \
     "grep -q '^Components: main apple' '$scratch/site-1/dists/forky/Release' && grep -q '^Architectures: amd64 arm64' '$scratch/site-1/dists/forky/Release'"
@@ -91,19 +92,10 @@ check "desktop publishes keep the kernel" has "$site" apple arm64 linux-image-7.
 check "the previous generations' indexes stay by hash" sh -c "cmp '$scratch/site-3/dists/forky/main/binary-amd64/Packages.xz' \
     '$(by_hash "$scratch/site-3" main/binary-amd64/Packages.xz | sed "s|site-3|site-4|")' &&
     test -e '$(by_hash "$scratch/site-2" main/binary-amd64/Packages | sed "s|site-2|site-4|")'"
-check "state/by-hash lists them" grep -q " main/binary-amd64/by-hash/SHA256/$(basename "$(by_hash "$scratch/site-2" main/binary-amd64/Packages.gz)")\$" "$site/state/by-hash"
+check "state/by-hash lists them" grep -q " forky/main/binary-amd64/by-hash/SHA256/$(basename "$(by_hash "$scratch/site-2" main/binary-amd64/Packages.gz)")\$" "$site/state/by-hash"
 check "a publish over a stale index still reads the live one by hash" \
     rebuild --live "$(serve "$(stale "$site" "$scratch/site-3")")" --add desktop:main="$scratch/in-4" --out "$scratch/stale"
 check "and keeps the newest build" both "$scratch/stale" main bande-compositor=0.0.0+git20261030.4.bbbbbb4
-
-renamed=$scratch/renamed-live renamed_conf=$scratch/renamed-conf
-cp -a "$site" "$renamed" && mv "$renamed/dists/forky" "$renamed/dists/old"
-cp -a "$conf" "$renamed_conf" && echo old > "$renamed_conf/previous-suite"
-check "a renamed suite is read from the previous one" "$root/scripts/rebuild.sh" --conf "$renamed_conf" \
-    --cache "$scratch/cache" --live "$(serve "$renamed")" --add-each apt:main="$scratch/in-apt" --out "$scratch/renamed"
-check "and keeps its packages" both "$scratch/renamed" main bande-compositor=0.0.0+git20261030.4.bbbbbb4
-check "and its kernel" has "$scratch/renamed" apple arm64 bande-os-apple=7.2.12-1+bande1
-check "under the new suite only" sh -c "[ ! -e '$scratch/renamed/dists/old' ]"
 
 kernel k2 7.2.14 7.2.14-1+bande1
 check "a second kernel" rebuild --live "$(serve "$site")" --add kernel:apple="$scratch/in-k2" --out "$scratch/site-k2"
@@ -127,23 +119,23 @@ refuses "an older build is refused" "is older than" \
     rebuild --live "$live" --add desktop:main="$scratch/in-2" --out "$scratch/older"
 refuses "an older kernel is refused" "is older than" \
     rebuild --live "$live" --add kernel:apple="$scratch/in-k2" --out "$scratch/older-kernel"
-make_deb "$scratch/in-changed" bande-compositor 0.0.0+git20261030.4.bbbbbb4 arm64 changed
+make_deb "$scratch/in-changed/forky" bande-compositor 0.0.0+git20261030.4.bbbbbb4 arm64 changed
 refuses "a changed package under a published version is refused" "different contents" \
     rebuild --live "$live" --add desktop:main="$scratch/in-changed" --out "$scratch/changed"
-make_deb "$scratch/in-split" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
-make_deb "$scratch/in-split" bande-greeter 0.0.0+git20261031.6.ddddddd arm64
-refuses "one architecture's packages of two versions are refused" "arm64 packages for main carry different versions" \
+make_deb "$scratch/in-split/forky" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
+make_deb "$scratch/in-split/forky" bande-greeter 0.0.0+git20261031.6.ddddddd arm64
+refuses "one architecture's packages of two versions are refused" "arm64 packages for forky/main carry different versions" \
     rebuild --live "$live" --add desktop:main="$scratch/in-split" --out "$scratch/split"
-make_deb "$scratch/in-split-all" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
-make_deb "$scratch/in-split-all" bande-desktop 0.0.0+git20261031.6.ddddddd all
-refuses "an architecture-independent package of another version is refused" "arm64 packages for main carry different versions" \
+make_deb "$scratch/in-split-all/forky" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
+make_deb "$scratch/in-split-all/forky" bande-desktop 0.0.0+git20261031.6.ddddddd all
+refuses "an architecture-independent package of another version is refused" "arm64 packages for forky/main carry different versions" \
     rebuild --live "$live" --add desktop:main="$scratch/in-split-all" --out "$scratch/split-all"
-make_deb "$scratch/in-mixed" bande-compositor 0.0.0+git20261031.5.ccccccc amd64
-make_deb "$scratch/in-mixed" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
-make_deb "$scratch/in-mixed" bande-apt-source 1.1 all
+make_deb "$scratch/in-mixed/forky" bande-compositor 0.0.0+git20261031.5.ccccccc amd64
+make_deb "$scratch/in-mixed/forky" bande-compositor 0.0.0+git20261031.5.ccccccc arm64
+make_deb "$scratch/in-mixed/forky" bande-apt-source 1.1 all
 refuses "a source may not publish the repository packages" "bande-apt-source is built by apt itself, not desktop" \
     rebuild --live "$live" --add desktop:main="$scratch/in-mixed" --out "$scratch/mixed"
-make_deb "$scratch/in-misplaced" bande-archive-keyring 1.1 all
+make_deb "$scratch/in-misplaced/forky" bande-archive-keyring 1.1 all
 refuses "repository packages stay in main" "belongs in main" \
     rebuild --live "$live" --add-each apt:apple="$scratch/in-misplaced" --out "$scratch/misplaced"
 REPOSITORY_VERSION=1.0 SOURCE_DATE_EPOCH=86400 "$root/scripts/build-repository-packages.sh" "$scratch/in-apt-rebuilt" > /dev/null
@@ -154,7 +146,7 @@ check "the published ones stay" cmp "$(find "$site/pool" -name 'bande-archive-ke
 REPOSITORY_VERSION=1.1 "$root/scripts/build-repository-packages.sh" "$scratch/in-apt-new" > /dev/null
 check "a new version of the repository packages" rebuild --live "$live" --add-each apt:main="$scratch/in-apt-new" --out "$scratch/apt-new"
 check "the keyring is 1.1" both "$scratch/apt-new" main bande-archive-keyring=1.1
-check "the source package is 1.1" both "$scratch/apt-new" main bande-apt-source=1.1
+check "the source package is 1.1" both "$scratch/apt-new" main bande-apt-source=1.1~deb14
 
 desktop 5 0.0.0+git20261031.5.eeeeeee
 kernel k4 7.3.2 7.3.2-1+bande1
@@ -168,7 +160,7 @@ check "the oldest generation's indexes leave by hash" test ! -e "$(by_hash "$scr
 # is 100 seconds older than written).
 early=$(mktemp -d -p "$scratch")
 cp -r "$site/." "$early/"
-live_xz=main/binary-amd64/by-hash/SHA256/$(basename "$(by_hash "$site" main/binary-amd64/Packages.xz)")
+live_xz=forky/main/binary-amd64/by-hash/SHA256/$(basename "$(by_hash "$site" main/binary-amd64/Packages.xz)")
 # Shift the whole seconds only: awk would print the time through OFMT, which
 # mawk 1.3.4 20250131 renders as 1.79363e+09 and later mawk truncates.
 while read -r mtime path; do
@@ -186,8 +178,8 @@ refuses "every batch is checked" "built by apt itself, not kernel" \
 
 a1=0.1.0+git20261101.3.aaaaaaa a2=0.2.0+git20261101.4.bbbbbbb
 for arch in amd64 arm64; do
-    make_deb "$scratch/in-apps" bande-weather "$a1" $arch
-    make_deb "$scratch/in-apps" bande-clock "$a2" $arch
+    make_deb "$scratch/in-apps/forky" bande-weather "$a1" $arch
+    make_deb "$scratch/in-apps/forky" bande-clock "$a2" $arch
 done
 check "an apps publish" rebuild --live "$live" --add-each apps:main="$scratch/in-apps" --processed apps=501,502 --out "$scratch/apps"
 check "main takes an app at its own version" both "$scratch/apps" main "bande-weather=$a1"
@@ -196,42 +188,42 @@ check "the desktop stays beside the apps" both "$scratch/apps" main bande-compos
 check "owners name each source" sh -c "grep -qx 'bande-weather apps' '$scratch/apps/state/owners' && grep -qx 'bande-compositor desktop' '$scratch/apps/state/owners' && grep -qx 'bande-os-apple kernel' '$scratch/apps/state/owners'"
 check "the processed runs are kept" sh -c "grep -qx 'apps 501' '$scratch/apps/state/processed' && grep -qx 'apps 502' '$scratch/apps/state/processed'"
 apps_live=$(serve "$scratch/apps")
-for arch in amd64 arm64; do make_deb "$scratch/in-apps-again" bande-weather "$a1" $arch rebuilt; done
+for arch in amd64 arm64; do make_deb "$scratch/in-apps-again/forky" bande-weather "$a1" $arch rebuilt; done
 check "a same-version republish of an app is skipped" rebuild --live "$apps_live" --add-each apps:main="$scratch/in-apps-again" --processed apps=503 --out "$scratch/apps-again"
 check "the published app is kept" diff <(find "$scratch/apps/pool" -name 'bande-weather_*' -exec sha256sum {} + | awk '{ print $1 }' | sort) \
     <(find "$scratch/apps-again/pool" -name 'bande-weather_*' -exec sha256sum {} + | awk '{ print $1 }' | sort)
 check "processed runs carry over and grow" sh -c "grep -qx 'apps 501' '$scratch/apps-again/state/processed' && grep -qx 'apps 503' '$scratch/apps-again/state/processed'"
-for arch in amd64 arm64; do make_deb "$scratch/in-apps-old" bande-weather 0.1.0+git20261031.2.9999999 $arch; done
+for arch in amd64 arm64; do make_deb "$scratch/in-apps-old/forky" bande-weather 0.1.0+git20261031.2.9999999 $arch; done
 check "an older app is skipped" rebuild --live "$apps_live" --add-each apps:main="$scratch/in-apps-old" --out "$scratch/apps-old"
 check "the newer app stays" both "$scratch/apps-old" main "bande-weather=$a1"
 check "a publish without apps keeps the processed runs" sh -c "'$root/scripts/rebuild.sh' --conf '$conf' --live '$apps_live' --add desktop:main='$scratch/in-4' --out '$scratch/apps-desktop' > /dev/null && grep -qx 'apps 502' '$scratch/apps-desktop/state/processed'"
 d6=0.0.0+git20261101.6.fffffff
-make_deb "$scratch/in-recommending" bande-compositor "$d6" amd64
-make_deb "$scratch/in-recommending" bande-compositor "$d6" arm64
-recommends=bande-weather make_deb "$scratch/in-recommending" bande-desktop "$d6" all
+make_deb "$scratch/in-recommending/forky" bande-compositor "$d6" amd64
+make_deb "$scratch/in-recommending/forky" bande-compositor "$d6" arm64
+recommends=bande-weather make_deb "$scratch/in-recommending/forky" bande-desktop "$d6" all
 check "a desktop that recommends an app is taken" rebuild --live "$apps_live" --add desktop:main="$scratch/in-recommending" --out "$scratch/recommending"
 check "the desktop recommends the app" sh -c "grep -A8 '^Package: bande-desktop' '$scratch/recommending/dists/forky/main/binary-arm64/Packages' | grep -qx 'Recommends: bande-weather'"
 check "the app it recommends keeps its own version" both "$scratch/recommending" main "bande-weather=$a1"
 check "and stays the apps repository's" grep -qx 'bande-weather apps' "$scratch/recommending/state/owners"
-for arch in amd64 arm64; do make_deb "$scratch/in-apps-taken" bande-compositor 9.0.0+git20261101.9.ccccccc $arch; done
+for arch in amd64 arm64; do make_deb "$scratch/in-apps-taken/forky" bande-compositor 9.0.0+git20261101.9.ccccccc $arch; done
 refuses "an app may not take a desktop package" "bande-compositor is published from desktop, not apps" \
     rebuild --live "$apps_live" --add-each apps:main="$scratch/in-apps-taken" --out "$scratch/apps-taken"
-make_deb "$scratch/in-desktop-taken" bande-weather 0.3.0 all
+make_deb "$scratch/in-desktop-taken/forky" bande-weather 0.3.0 all
 refuses "the desktop may not take an app" "bande-weather is published from apps, not desktop" \
     rebuild --live "$apps_live" --add desktop:main="$scratch/in-desktop-taken" --out "$scratch/desktop-taken"
 refuses "two sources may not claim one name in one publish" "is published from desktop, not apps" \
     rebuild --live "$live" --add desktop:main="$scratch/in-desktop-taken" --add-each apps:main="$scratch/in-apps" --out "$scratch/both-claim"
-for arch in amd64 arm64; do make_deb "$scratch/in-handed" bande-weather 1.0.0-1+bande1 $arch; done
+for arch in amd64 arm64; do make_deb "$scratch/in-handed/forky" bande-weather 1.0.0-1+bande1 $arch; done
 echo 'bande-weather apps web' > "$conf/handovers"
 check "a handed-over name is taken by its new source" rebuild --live "$apps_live" --add web:main="$scratch/in-handed" --out "$scratch/handed"
 rm "$conf/handovers"
 check "which then owns it" grep -qx 'bande-weather web' "$scratch/handed/state/owners"
 
-make_deb "$scratch/in-arm64" bande-compositor "$d1" arm64
-make_deb "$scratch/in-arm64" bande-desktop "$d1" all
+make_deb "$scratch/in-arm64/forky" bande-compositor "$d1" arm64
+make_deb "$scratch/in-arm64/forky" bande-desktop "$d1" all
 partial_conf=$scratch/partial-conf
 cp -r "$conf" "$partial_conf"
-sed -i 's/^Architectures: .*/Architectures: arm64/; s/^Components: .*/Components: main/' "$partial_conf/distributions"
+sed -i 's/^Architectures: .*/Architectures: arm64/; s/^Components: .*/Components: main/' "$partial_conf/distribution.in"
 (export GNUPGHOME=$conf/gnupg
  "$root/scripts/rebuild.sh" --conf "$partial_conf" --live "$(serve "$empty")" \
     --add desktop:main="$scratch/in-arm64" --out "$scratch/partial") > /dev/null
@@ -324,10 +316,10 @@ check "apt downloads the keyring from it" "${apt_env[@]}" apt-get install -y -q 
 check "the download is the newest build" test -e "$lists/archives/bande-compositor_0.0.0+git20261030.4.bbbbbb4_${host_arch}.deb"
 
 # Language packs of an l10n tag go in only for the release they were built on.
-packs() { local p; for p in sv en-gb; do enhances=$2 make_deb "$1" "$2-l10n-$p" "$3" all; done; }
-make_deb "$scratch/in-l0" bande-desktop 0.1.0 all
+packs() { local p; for p in sv en-gb; do enhances=$2 make_deb "$1/forky" "$2-l10n-$p" "$3" all; done; }
+make_deb "$scratch/in-l0/forky" bande-desktop 0.1.0 all
 packs "$scratch/in-l0" bande-desktop 0.1.0
-for a in amd64 arm64; do make_deb "$scratch/in-w0" bande-weather 0.1.0 $a; done
+for a in amd64 arm64; do make_deb "$scratch/in-w0/forky" bande-weather 0.1.0 $a; done
 packs "$scratch/in-w0" bande-weather 0.1.0
 check "a release with its packs" rebuild --live "$(serve "$empty")" --add desktop:main="$scratch/in-l0" \
     --add-each apps:main="$scratch/in-w0" --add-each apt:main="$scratch/in-apt" --out "$scratch/l0"
@@ -343,8 +335,8 @@ packs "$scratch/in-w2" bande-weather 0.2.0+l10n20261109
 rebuild --live "$(serve "$scratch/l1")" --add-l10n desktop:main="$scratch/in-l2" --add-l10n apps:main="$scratch/in-w2" \
     --out "$scratch/l2" > "$scratch/l2.log" 2>&1 || true
 check "are both left out" diff <(listed "$scratch/l1" main arm64) <(listed "$scratch/l2" main arm64)
-check "saying why" grep -q 'skipping bande-weather-l10n-sv 0.2.0+l10n20261109, built for bande-weather 0.2.0; main has 0.1.0' "$scratch/l2.log"
-make_deb "$scratch/in-l3" bande-desktop 0.2.0 all
+check "saying why" grep -q 'skipping bande-weather-l10n-sv 0.2.0+l10n20261109, built for bande-weather 0.2.0; forky/main has 0.1.0' "$scratch/l2.log"
+make_deb "$scratch/in-l3/forky" bande-desktop 0.2.0 all
 packs "$scratch/in-l3" bande-desktop 0.2.0
 packs "$scratch/in-l4" bande-desktop 0.2.0+l10n20261110
 packs "$scratch/in-l5" bande-desktop 0.1.0+l10n20261110
@@ -356,8 +348,58 @@ check "a release published with packs built on the one before" rebuild --live "$
     --add-l10n desktop:main="$scratch/in-l5" --add desktop:main="$scratch/in-l3" --out "$scratch/l4"
 check "keeps the release's packs" has "$scratch/l4" main amd64 bande-desktop-l10n-sv=0.2.0
 refuses "packs that enhance no single package are refused" "not one package" rebuild --live "$(serve "$scratch/l1")" \
-    --add-l10n desktop:main="$(enhances='bande-desktop, bande-shell' make_deb "$scratch/in-l6" bande-desktop-l10n-sv 0.1.0+l10n20261111 all; echo "$scratch/in-l6")" \
+    --add-l10n desktop:main="$(enhances='bande-desktop, bande-shell' make_deb "$scratch/in-l6/forky" bande-desktop-l10n-sv 0.1.0+l10n20261111 all; echo "$scratch/in-l6")" \
     --out "$scratch/l6"
+
+# Two suites: duke is added beside the live forky, which carries unsuffixed
+# packages from before the suites had suffixes.
+two=$scratch/two-conf
+cp -r "$conf" "$two" && printf 'forky\nduke\n' > "$two/suites"
+in_suite() { local d=$scratch/in-$1/$2; shift 2; make_deb "$d" "$@"; }
+REPOSITORY_VERSION=1.1 "$root/scripts/build-repository-packages.sh" "$scratch/in-apt-two" "$two" > /dev/null
+check "a publish with two suites" bash -c "\"\$0\" \"\$@\" > '$scratch/two.log' 2>&1 || { cat '$scratch/two.log'; exit 1; }" "$root/scripts/rebuild.sh" --conf "$two" --live "$live" --add-each apt:main="$scratch/in-apt-two" \
+    --add desktop:main="$scratch/in-4" --out "$scratch/two"
+check "a suite added to conf/suites starts empty" grep -q 'serves no duke yet; it starts empty' "$scratch/two.log"
+check "it gets its own Release, signed" gpgv --keyring "$conf/keyring.gpg" "$scratch/two/dists/duke/InRelease"
+check "named after it" sh -c "grep -qx 'Codename: duke' '$scratch/two/dists/duke/Release' && grep -qx 'Suite: duke' '$scratch/two/dists/duke/Release' && grep -q '^Description: Bande for Debian 15 (duke)' '$scratch/two/dists/duke/Release'"
+check "forky keeps its unsuffixed packages" diff <(listed "$site" main arm64 | tr ' ' '\n' | grep -v '^bande-a') \
+    <(listed "$scratch/two" main arm64 | tr ' ' '\n' | grep -v '^bande-a')
+check "and its kernels" diff <(listed "$site" apple arm64) <(listed "$scratch/two" apple arm64)
+check "a run with forky packages alone leaves duke without them" lacks "$scratch/two" main arm64 bande-desktop=0.0.0+git20261030.4.bbbbbb4 duke
+check "each suite has its own source package" bash -c "$(declare -f listed has both); both '$scratch/two' main bande-apt-source=1.1~deb14 && both '$scratch/two' main bande-apt-source=1.1~deb15 duke"
+check "and the one keyring" bash -c "$(declare -f listed has both); both '$scratch/two' main bande-archive-keyring=1.1 && both '$scratch/two' main bande-archive-keyring=1.1 duke"
+check "which the suites share in the pool" test "$(find "$scratch/two/pool" -name 'bande-archive-keyring_*' | wc -l)" = 1
+check "duke's source follows duke" sh -c "dpkg-deb --fsys-tarfile '$(find "$scratch/two/pool" -name 'bande-apt-source_1.1~deb15_all.deb')' | tar -xO ./etc/apt/sources.list.d/bande.sources | grep -qx 'Suites: duke'"
+check "state/by-hash lists both suites" sh -c "grep -q ' forky/main/binary-arm64/by-hash/' '$scratch/two/state/by-hash' && grep -q ' duke/main/binary-arm64/by-hash/' '$scratch/two/state/by-hash'"
+for a in amd64 arm64; do in_suite s2 duke bande-compositor 0.1.0~deb15 $a; done
+in_suite s2 duke bande-desktop 0.1.0~deb15 all
+check "a run for duke alone" "$root/scripts/rebuild.sh" --conf "$two" --live "$(serve "$scratch/two")" \
+    --add desktop:main="$scratch/in-s2" --out "$scratch/two-duke"
+check "feeds duke" has "$scratch/two-duke" main arm64 bande-compositor=0.1.0~deb15 duke
+check "and leaves forky as it is" diff <(listed "$scratch/two" main arm64) <(listed "$scratch/two-duke" main arm64)
+check "the earlier generation stays by hash in each suite" sh -c "test -e '$(by_hash "$scratch/two" main/binary-arm64/Packages.xz duke | sed "s|/two/|/two-duke/|")' &&
+    test -e '$(by_hash "$scratch/two" main/binary-arm64/Packages.xz | sed "s|/two/|/two-duke/|")'"
+for a in amd64 arm64; do in_suite s3 forky bande-compositor 0.1.0~deb14 $a; done
+in_suite s3 forky bande-desktop 0.1.0~deb14 all
+check "a suffixed release replaces an unsuffixed older one" "$root/scripts/rebuild.sh" --conf "$two" \
+    --live "$(serve "$scratch/two-duke")" --add desktop:main="$scratch/in-s3" --out "$scratch/two-forky"
+check "in forky" both "$scratch/two-forky" main bande-compositor=0.1.0~deb14
+for p in sv en-gb; do enhances=bande-desktop in_suite s4 forky "bande-desktop-l10n-$p" 0.1.0~deb14+l10n20261111 all; done
+check "packs at RELEASE~debNN+l10nSTAMP go in beside their release" "$root/scripts/rebuild.sh" --conf "$two" \
+    --live "$(serve "$scratch/two-forky")" --add-l10n desktop:main="$scratch/in-s4" --out "$scratch/two-l10n"
+check "in their suite" both "$scratch/two-l10n" main bande-desktop-l10n-sv=0.1.0~deb14+l10n20261111
+check "and not in another" lacks "$scratch/two-l10n" main arm64 bande-desktop-l10n-sv=0.1.0~deb14+l10n20261111 duke
+for a in amd64 arm64; do in_suite s5 forky bande-compositor 0.0.0+git20261030.4.bbbbbb4~deb14 $a; done
+refuses "the suffix sorts below the unsuffixed version" "is older than" "$root/scripts/rebuild.sh" --conf "$two" \
+    --live "$(serve "$scratch/two")" --add desktop:main="$scratch/in-s5" --out "$scratch/two-older"
+make_deb "$scratch/in-flat" bande-compositor 0.2.0~deb14 arm64
+refuses "packages outside a suite's directory are refused" "outside a suite's directory" "$root/scripts/rebuild.sh" --conf "$two" \
+    --live "$(serve "$scratch/two")" --add desktop:main="$scratch/in-flat" --out "$scratch/two-flat"
+in_suite sid sid bande-compositor 0.2.0~deb14 arm64
+refuses "a directory of a suite not listed is refused" "not a suite conf/suites lists" "$root/scripts/rebuild.sh" --conf "$two" \
+    --live "$(serve "$scratch/two")" --add desktop:main="$scratch/in-sid" --out "$scratch/two-sid"
+refuses "a site with key.asc but no suite's InRelease is still refused" "no suite's InRelease" "$root/scripts/rebuild.sh" --conf "$two" \
+    --live "$(serve "$half")" --add-each apt:main="$scratch/in-apt-two" --out "$scratch/two-half"
 
 cp "$conf/archive-key.asc" "$scratch/old-key.asc"
 add_archive_key "$conf"

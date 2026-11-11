@@ -28,6 +28,7 @@ jobs:
       contents: read
     outputs:
       runs: ${{ steps.find.outputs.runs }}
+      suites: ${{ steps.find.outputs.suites }}
     steps:
       - name: Install git, so the checkout carries the history
         run: |
@@ -57,6 +58,7 @@ jobs:
           tr , '\n' <<< "$RUNS" > runs
           cat runs
           echo "runs=$(paste -sd, runs)" >> "$GITHUB_OUTPUT"
+          echo "suites=$(jq -Rnc '[inputs]' conf/suites)" >> "$GITHUB_OUTPUT"
           echo "### Publishing" >> "$GITHUB_STEP_SUMMARY"
           while read -r repo id; do
             if [ "$repo" = resign ]; then
@@ -171,13 +173,17 @@ jobs:
           gpgconf --kill all
           rm -rf "$GNUPGHOME"
 
-      - name: Name the desktop version the site serves
+      - name: Name the desktop version each suite serves
         id: served
         run: |
-          version=$(awk -v RS= '$0 ~ "(^|\n)Package: bande-desktop\n"' public/dists/forky/main/binary-amd64/Packages |
-            sed -n 's/^Version: //p')
-          echo "bande-desktop ${version:-is not in the archive yet}"
-          echo "desktop=$version" >> "$GITHUB_OUTPUT"
+          served=()
+          while read -r suite; do
+            version=$(awk -v RS= '$0 ~ "(^|\n)Package: bande-desktop\n"' "public/dists/$suite/main/binary-amd64/Packages" |
+              sed -n 's/^Version: //p')
+            echo "$suite: bande-desktop ${version:-is not in the suite yet}"
+            [ -z "$version" ] || served+=("$suite=$version")
+          done < conf/suites
+          echo "desktop=${served[*]}" >> "$GITHUB_OUTPUT"
 
       - name: Upload the site (actions/upload-pages-artifact v5)
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9
@@ -189,8 +195,8 @@ jobs:
         with:
           name: repository-packages
           path: |
-            debs-apt/bande-archive-keyring_*_all.deb
-            debs-apt/bande-apt-source_*_all.deb
+            debs-apt/*/bande-archive-keyring_*_all.deb
+            debs-apt/*/bande-apt-source_*_all.deb
           if-no-files-found: error
 
   deploy:
@@ -240,13 +246,14 @@ jobs:
         run: scripts/bootstrap-release.sh debs
 
   verify:
-    needs: [build, deploy]
+    needs: [find, build, deploy]
     strategy:
       fail-fast: false
       matrix:
+        suite: ${{ fromJSON(needs.find.outputs.suites) }}
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
-    container: debian:forky
+    container: debian:${{ matrix.suite }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -255,6 +262,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Install the repository packages from the live archive
+        env:
+          SUITE: ${{ matrix.suite }}
         run: |
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends ca-certificates curl gpg
@@ -263,8 +272,8 @@ jobs:
           [ "$(scripts/fetch-fresh.sh https://bande-linux.github.io/apt key.asc /tmp/live-key.asc)" = 200 ]
           gpg --batch --dearmor < /tmp/live-key.asc > /tmp/live.gpg
           cmp /tmp/archive.gpg /tmp/live.gpg
-          printf 'Types: deb\nURIs: https://bande-linux.github.io/apt\nSuites: forky\nComponents: main\nSigned-By: /tmp/archive.gpg\n' \
-            > /etc/apt/sources.list.d/bootstrap.sources
+          printf 'Types: deb\nURIs: https://bande-linux.github.io/apt\nSuites: %s\nComponents: main\nSigned-By: /tmp/archive.gpg\n' \
+            "$SUITE" > /etc/apt/sources.list.d/bootstrap.sources
           for attempt in 1 2 3 4 5; do
             apt-get update -o APT::Update::Error-Mode=any && apt-get install -y bande-archive-keyring bande-apt-source && break
             [ "$attempt" != 5 ] || exit 1
@@ -274,12 +283,21 @@ jobs:
           rm /etc/apt/sources.list.d/bootstrap.sources
           apt-get update -o APT::Update::Error-Mode=any
           apt-cache policy bande-archive-keyring
+          grep -qx "Suites: $SUITE" /etc/apt/sources.list.d/bande.sources
 
       - name: Install the desktop just published and check it is this architecture's build
+        id: desktop
         if: needs.build.outputs.desktop != ''
         env:
-          VERSION: ${{ needs.build.outputs.desktop }}
+          SERVED: ${{ needs.build.outputs.desktop }}
+          SUITE: ${{ matrix.suite }}
         run: |
+          VERSION=$(tr ' ' '\n' <<< "$SERVED" | sed -n "s/^$SUITE=//p")
+          if [ -z "$VERSION" ]; then
+            echo "$SUITE carries no desktop yet"
+            exit 0
+          fi
+          echo "installed=yes" >> "$GITHUB_OUTPUT"
           architecture=$(dpkg --print-architecture)
           for attempt in 1 2 3 4 5; do
             served=$(apt-cache show --no-all-versions bande-desktop 2>/dev/null | sed -n 's/^Version: //p' || true)
@@ -310,14 +328,16 @@ jobs:
           grep -q '^WAYLAND_DISPLAY=wayland-' compositor.out
 
       - name: Check every package bande-desktop recommends has a candidate here or in Debian
-        if: needs.build.outputs.desktop != ''
+        if: steps.desktop.outputs.installed == 'yes'
+        env:
+          SUITE: ${{ matrix.suite }}
         run: |
           missing=$(apt-cache show --no-all-versions bande-desktop | sed -n 's/^Recommends: //p' | tr ',' '\n' |
             sed 's/^ *//; s/[ (|].*//' | while read -r package; do
               candidate=$(apt-cache policy "$package" | sed -n 's/^ *Candidate: //p')
               [ -n "$candidate" ] && [ "$candidate" != "(none)" ] || echo "$package"
             done | xargs)
-          [ -z "$missing" ] || echo "::warning::bande-desktop recommends packages that neither the archive nor Debian forky has: $missing"
+          [ -z "$missing" ] || echo "::warning::bande-desktop recommends packages that neither the archive nor Debian $SUITE has: $missing"
 
   report:
     needs: [build, deploy]

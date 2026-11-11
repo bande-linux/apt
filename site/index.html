@@ -21,16 +21,19 @@ p code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
 <body>
 <main>
 <h1>Bande</h1>
-<p class="lead">APT repository for the Bande desktop on Debian 14 (forky), amd64 and arm64. One suite,
-<code>forky</code>: every tagged desktop release, and the Mac mini kernel as Debian forky updates it.</p>
+<p class="lead">APT repository for the Bande desktop on Debian, amd64 and arm64. One suite per
+Debian release, named by its codename; today <code>forky</code> (Debian 14): every tagged desktop
+release, and the Mac mini kernel as Debian forky updates it.</p>
 
 <h2>Install</h2>
 <p>On Debian 14 (forky). The packages are built against forky and do not install on Debian 13 (trixie).</p>
-<p>1. Download the keyring and the source package from the latest GitHub release, and install both:</p>
+<p>1. Download the keyring and your Debian release's source package from the latest GitHub
+release, and install both:</p>
 <pre><code>cd /tmp
+suite=$(. /etc/os-release && echo "$VERSION_CODENAME")
 wget https://github.com/bande-linux/apt/releases/latest/download/bande-archive-keyring.deb \
-     https://github.com/bande-linux/apt/releases/latest/download/bande-apt-source.deb
-sudo apt install ./bande-archive-keyring.deb ./bande-apt-source.deb</code></pre>
+     "https://github.com/bande-linux/apt/releases/latest/download/bande-apt-source-$suite.deb"
+sudo apt install ./bande-archive-keyring.deb "./bande-apt-source-$suite.deb"</code></pre>
 <p>This adds <code>/etc/apt/sources.list.d/bande.sources</code>:</p>
 <pre><code>Types: deb
 URIs: https://bande-linux.github.io/apt

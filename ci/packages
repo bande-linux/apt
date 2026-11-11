@@ -1,6 +1,7 @@
 apt-utils
 ca-certificates
 curl
+distro-info-data
 dpkg-dev
 git
 gnupg

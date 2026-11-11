@@ -9,7 +9,10 @@ Install instructions for users are on the site ([`site/index.html`](site/index.h
 
 ## The archive
 
-One suite, `forky`, for Debian 14 (forky):
+One suite per Debian release, named by its codename. [`conf/suites`](conf/suites) lists them, one
+per line, and is the only list: the source repositories read it from `main` to build their
+matrix, and every publish rebuilds each suite it lists. Today it lists `forky` (Debian 14).
+Each suite has the same components, which share one pool:
 
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
@@ -25,18 +28,54 @@ the kernel version in their name, so `apple` keeps the packages of the newest tw
 versions and drops older ones; kernel debs are large and the site must stay under the Pages
 limit.
 
+### Suites and versions
+
+Every package built for a suite carries `~debNN` right after its release version, NN being the
+Debian version number (from distro-info-data's `debian.csv`; `forky` is 14), as Debian's
+backports carry `~bpoNN+N`:
+
+| Source | Version |
+|---|---|
+| desktop `vX.Y.Z`, app `<app>-vX.Y.Z` | `X.Y.Z~deb14` |
+| `l10n-YYYYMMDD[.N]` packs | `X.Y.Z~deb14+l10nYYYYMMDD[.N]`, X.Y.Z the release they translate |
+| dict `dict-YYYYMMDD` | `YYYYMMDD~deb14` |
+| web and kernel (`bande-version-BASE`) | `BASE~deb14`, BASE `<debian-version>+bandeN` |
+| `bande-apt-source` | `1.N~deb14`, one per suite |
+| `bande-archive-keyring` | `1.N`, the same file for every suite |
+
+`~` sorts below everything, so `X.Y.Z~deb14` is older than an unsuffixed `X.Y.Z` (the packages
+published before the suffix are carried over until a newer release replaces them), and
+`X.Y.Z~deb14` < `X.Y.Z~deb15`: a machine upgraded from forky to duke, its source switched to
+`duke`, upgrades Bande too, even at the same release. Find-runs compares a tag with the live
+versions without the suffix.
+
+A source run uploads, for each suite it built, `bande-debs-<suite>-<arch>` artifacts (the
+architectures below). A run without any artifact of a listed suite, such as one built before
+the suite was added, leaves that suite as it is; it must carry at least one suite. The kernel
+does not build per suite yet: its runs upload `bande-debs-arm64`, unsuffixed (or `~deb14`), and
+feed `forky` alone.
+
+- **Adding a suite** (Debian 15 `duke`): add `duke` to `conf/suites` and push. The next publish
+  starts `dists/duke` empty with the repository packages, and the next tags of the source
+  repositories build for it. Its `debian:duke` image and distro-info-data must know it.
+- **Dropping a suite** at its Debian EOL: delete its line. The next publish no longer builds
+  it, so `dists/<suite>` and its pool files leave the site; machines on it get no more updates.
+  Users move to the next suite by upgrading Debian and installing that suite's
+  `bande-apt-source` (step 1 of the site).
+
 ## The repository packages
 
 `bande-archive-keyring` (the keys of [`conf/archive-key.asc`](conf/archive-key.asc) and an APT
 pin that lets the archive provide only `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` and
-`linux-*-apple-*`) and `bande-apt-source` (`forky main`; its postinst adds `apple` in
-`bande-apple.sources` on Apple Silicon) are built by this repository,
+`linux-*-apple-*`) and, for each suite, `bande-apt-source` (`<suite> main`; its postinst adds
+`apple` in `bande-apple.sources` on Apple Silicon) are built by this repository,
 from [`packaging/`](packaging), with
 [`scripts/build-repository-packages.sh`](scripts/build-repository-packages.sh). No source
 repository may publish them, so the archive depends on none of them.
 
-- Their version is `1.N`, where N counts the commits that touched `packaging/`, the keys or the
-  build script. Change any of them and the next publish carries a new version.
+- Their version is `1.N` (`1.N~debNN` for the source), where N counts the commits that touched
+  `packaging/`, the keys, `conf/suites` or the build script. Change any of them and the next
+  publish carries a new version; so a new suite gets its own.
 - The same commit builds byte-identical packages. Every publish adds them to `main`, for every
   architecture; one already published at its version is kept.
 
@@ -60,7 +99,8 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    whose signature it checks; it reads the live site as described in
    [Pages caching](#pages-caching). A source repository that does not exist yet, or has no green run,
    is nothing new:
-   - apt: repository packages of a version newer than the live `bande-archive-keyring`;
+   - apt: repository packages of a version newer than the live `bande-archive-keyring` of any
+     suite (a suite not served yet has none);
    - desktop: the green `release.yml` push of the highest `vX.Y.Z` tag, against the version of
      `bande-desktop` in `main`;
    - dict: the green `dict.yml` push of the desktop's highest `dict-YYYYMMDD` tag, against the
@@ -80,8 +120,10 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
      app's `<app>-vX.Y.Z`) is newer than what `main` serves or this publish takes, since its
      packs are built on that release.
 
-   - resign: the live `InRelease`'s `Valid-Until` is less than 7 days out, or missing. Past
-     it, only the re-sign is started.
+   - resign: a suite's live `InRelease` has its `Valid-Until` less than 7 days out, or none.
+     Past it, only the re-sign is started.
+
+   Each live version is the newest across the suites, without the suite's `~debNN`.
 
    With nothing new the workflow stops there: no rebuild, no deploy, and no use of the
    `apt-publish` environment. Releases of several repositories found together go out in one
@@ -109,31 +151,35 @@ same releases.
      the run's history;
    - its commit must be on `main`.
 
-   It then downloads the `bande-debs-ARCH` artifacts. The desktop uploads `amd64`, `arm64`
-   and `all`, the kernel `arm64`, web `amd64`, `arm64` and `all` (the language packs), and apps
-   `amd64` and `arm64`. It refuses:
+   It then downloads, for each suite, the `bande-debs-<suite>-<arch>` artifacts into
+   `<dir>/<suite>/`. The desktop uploads `amd64`, `arm64` and `all`, web `amd64`, `arm64` and
+   `all` (the language packs), apps `amd64` and `arm64`, dict and l10n `all`; the kernel
+   `bande-debs-arm64`. It refuses:
    - package names outside the repository's list; for apps, exactly `bande-<app>` of the tag
      and its packs `bande-<app>-l10n-*` (architecture `all`, in each architecture's artifact),
      and never a name of the desktop's (its `packaging/`
      directories, `bande-desktop`, `xdg-desktop-portal-bande`, the repository
      packages);
    - a package filed under another architecture's artifact;
-   - versions other than the run's: exactly the tag's `X.Y.Z` for the desktop, and for the
-     kernel and web the version its one `bande-version-VERSION` artifact names, of the form
-     `<debian-version>+bandeN`; for an app exactly its tag's `X.Y.Z`, so test builds'
-     `+git` versions are refused;
-   - an incomplete architecture: one that lacks a package another architecture carries.
+   - versions other than the run's plus the suite's suffix (see [Suites and
+     versions](#suites-and-versions)): the tag's `X.Y.Z~debNN` for the desktop and an app, so
+     test builds' `+git` versions are refused, and for the kernel and web the version its one
+     `bande-version-VERSION` artifact names, of the form `<debian-version>+bandeN`;
+   - an incomplete architecture: one that lacks a package another architecture carries in that
+     suite.
 
    Several apps runs merge into one directory, keeping each app's newest version. A refused
    apps run is recorded as taken and left out, so it cannot hold up the other releases; the
    publish then ends red, naming it.
-2. [`scripts/rebuild.sh`](scripts/rebuild.sh) rebuilds the whole archive with reprepro in a fresh
-   database:
+2. [`scripts/rebuild.sh`](scripts/rebuild.sh) rebuilds the whole archive, every suite, with
+   reprepro in a fresh database; [`conf/distribution.in`](conf/distribution.in) is each suite's
+   stanza:
    - its input is the live site, whose `InRelease` signatures, `Packages` and pool checksums are
-     all verified, plus the new packages: `--add SOURCE:COMPONENT=DIR` for a desktop or kernel
-     build, `--add web:main=DIR` for the browser, `--add-each apps:main=DIR` for apps;
-   - a component or architecture that the live `Release` does not list yet starts empty;
-   - for a desktop or kernel build, the new packages on each architecture (with the
+     all verified, plus the new packages, from `DIR/<suite>/`: `--add SOURCE:COMPONENT=DIR` for
+     a desktop or kernel build, `--add web:main=DIR` for the browser, `--add-each apps:main=DIR`
+     for apps;
+   - a suite, component or architecture that the live site does not serve yet starts empty;
+   - for a desktop or kernel build, the new packages of a suite on each architecture (with the
      architecture-independent ones) must carry one version, and
      it refuses a version older than the live one and changed contents under a published
      version;
@@ -144,8 +190,8 @@ same releases.
      `Enhances` is at `<release>`: one built on an older release, or on one not published, is
      skipped, so a translation-only build never replaces a newer release's packs;
    - it refuses a name that `state/owners` gives to another source;
-   - reprepro builds the pool and the `Packages` indexes; `apt-ftparchive release` writes
-     `Release` with SHA256 sums, `Acquire-By-Hash: yes` and `Valid-Until` 14 days out, and copies every index to
+   - reprepro builds the pool and the `Packages` indexes; `apt-ftparchive release` writes each
+     suite's `Release` with SHA256 sums, `Acquire-By-Hash: yes` and `Valid-Until` 14 days out, and copies every index to
      `by-hash/SHA256/<sha256>` beside it (see [Pages caching](#pages-caching));
    - it signs `Release` as `InRelease` and `Release.gpg` with every key in
      [`conf/signing-keys`](conf/signing-keys).
@@ -175,7 +221,7 @@ own. For up to ten minutes after a publish it can serve a new `InRelease` beside
 `Packages.xz`, or the other way round. The archive therefore follows Debian's by-hash layout:
 
 - `Release` carries `Acquire-By-Hash: yes`, and every index is also served at
-  `dists/forky/<component>/binary-<arch>/by-hash/SHA256/<sha256>`. That path never changes
+  `dists/<suite>/<component>/binary-<arch>/by-hash/SHA256/<sha256>`. That path never changes
   content, so apt (and `find-runs.sh` and `rebuild.sh`) always get the index that the
   `InRelease` they hold names.
 - apt-ftparchive keeps the newest 3 generations (`By-Hash-Keep`) in each by-hash directory, so a
@@ -196,30 +242,23 @@ own. For up to ten minutes after a publish it can serve a new `InRelease` beside
 - **Deploy:** the site is deployed with `actions/deploy-pages`.
 - **Bootstrap release:** when the repository packages reach a new version,
   [`scripts/bootstrap-release.sh`](scripts/bootstrap-release.sh) creates the GitHub release
-  `apt-source-VERSION`, which users download in the first install step.
-- **Verify:** after each deploy, a `debian:forky` container on amd64 and on arm64 checks that
-  the live `key.asc` is the archive key, installs `bande-archive-keyring` and `bande-apt-source`
-  from the live archive, and updates through the source they install. When the archive
-  carries a desktop, it waits until the site serves the version the build job put in, installs
+  `apt-source-VERSION`, which users download in the first install step:
+  `bande-archive-keyring.deb` and `bande-apt-source-<suite>.deb`.
+- **Verify:** after each deploy, for each suite, a `debian:<suite>` container on amd64 and on
+  arm64 checks that the live `key.asc` is the archive key, installs `bande-archive-keyring` and
+  `bande-apt-source` from that suite, and updates through the source they install. When the
+  suite carries a desktop, it waits until the site serves the version the build job put in, installs
   `bande-desktop`, checks that every installed `bande-*` package is built for the machine's
   architecture (or `all`) at that version, and starts the installed compositor headless. It
-  warns about any package `bande-desktop` recommends that neither the archive nor Debian forky
-  has, such as a default app from `bande-linux/apps` that has not been released yet.
+  warns about any package `bande-desktop` recommends that neither the archive nor that Debian
+  release has, such as a default app from `bande-linux/apps` that has not been released yet.
 
 ## First publish
 
 Nothing special: the first publish can come from any source, or from the repository packages
-alone. A site that serves neither `dists/forky/InRelease` nor `key.asc` has never been
-published, and [`scripts/rebuild.sh`](scripts/rebuild.sh) starts the archive. A site that
-serves `key.asc` but no `InRelease` is broken, and the publish refuses to build over it.
-
-## A new suite
-
-The suite is named after the Debian release it is built for (now `forky`, Debian 14). For the
-next one, set `Codename` and `Suite` in [`conf/distributions`](conf/distributions), the source
-in [`packaging/`](packaging), and name the old suite in `conf/previous-suite`: until the live
-site serves the new suite, a publish reads the archive from the old one and publishes it under
-the new name. Delete `conf/previous-suite` after that first publish.
+alone. A site that serves no suite's `InRelease` nor `key.asc` has never been published, and
+[`scripts/rebuild.sh`](scripts/rebuild.sh) starts the archive. A site that serves `key.asc` but
+no suite's `InRelease` is broken, and the publish refuses to build over it.
 
 ## Signing keys
 

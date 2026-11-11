@@ -8,10 +8,10 @@ export GH_TOKEN=test
 
 # A live archive serving desktop 0.1.0, kernel 7.2.12-1+bande1, bande-weather
 # 0.1.0 and repository packages 1.0, which has refused apps run 60.
-for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop" $p 0.1.0 all; done
-make_deb "$scratch/kernel" linux-image-7.2.12-apple-arm64-16k 7.2.12-1+bande1 arm64
-make_deb "$scratch/kernel" bande-os-apple 7.2.12-1+bande1 arm64
-for a in amd64 arm64; do make_deb "$scratch/apps" bande-weather 0.1.0 $a; done
+for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop/forky" $p 0.1.0 all; done
+make_deb "$scratch/kernel/forky" linux-image-7.2.12-apple-arm64-16k 7.2.12-1+bande1 arm64
+make_deb "$scratch/kernel/forky" bande-os-apple 7.2.12-1+bande1 arm64
+for a in amd64 arm64; do make_deb "$scratch/apps/forky" bande-weather 0.1.0 $a; done
 REPOSITORY_VERSION=1.0 "$root/scripts/build-repository-packages.sh" "$scratch/apt" > /dev/null
 empty=$(mktemp -d -p "$scratch")
 "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$empty")" \
@@ -215,7 +215,7 @@ check "an empty site takes the repository packages" sh -c "APT_VERSION=1.0 '$roo
 
 # Right after a publish the Pages CDN can serve the new InRelease beside the
 # old Packages.xz; the index is read by hash, so it still resolves.
-for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop-2" $p 0.2.0 all; done
+for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop-2/forky" $p 0.2.0 all; done
 "$root/scripts/rebuild.sh" --conf "$conf" --live "$live" --add desktop:main="$scratch/desktop-2" --out "$scratch/site-2" > /dev/null
 stale=$(mktemp -d -p "$scratch")
 cp -r "$scratch/site-2/." "$stale/"
@@ -244,6 +244,28 @@ d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" api "$d"
 check "an expired InRelease starts a re-sign" find_runs "$d/out" "$(serve "$expiring")"
 check "and no new run is taken from it" diff <(echo "resign expired") "$d/out"
 check "it warns" sh -c "'$root/scripts/find-runs.sh' '$(serve "$expiring")' '$conf' 2>&1 | grep -q 'warning: forky/InRelease expired at'"
+
+# Suites: a live version is compared without its suite's ~debNN, and a new
+# suite lacks the repository packages until they are published to it.
+two=$scratch/two-conf
+cp -r "$conf" "$two" && printf 'forky\nduke\n' > "$two/suites"
+d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" api "$d"
+check "a suite not served yet wants the repository packages" sh -c "APT_VERSION=1.0 '$root/scripts/find-runs.sh' '$live' '$two' > '$d/out'"
+check "and only them, as the other suite has the desktop" diff <(echo "apt 1.0") "$d/out"
+for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop-3/forky" $p 0.2.0~deb14 all; done
+"$root/scripts/rebuild.sh" --conf "$two" --live "$live" --add desktop:main="$scratch/desktop-3" --out "$scratch/site-3" > /dev/null
+d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" api "$d"
+check "a tag served with the suite suffix is published" sh -c "'$root/scripts/find-runs.sh' '$(serve "$scratch/site-3")' '$two' > '$d/out'"
+check "nothing is printed for it" test ! -s "$d/out"
+d=$(mktemp -d -p "$scratch"); desktop_runs="32:v0.2.1:success 31:v0.2.0:success" api "$d"
+check "a newer tag is found over it" find_runs "$d/out" "$(serve "$scratch/site-3")"
+check "and printed" diff <(echo "desktop 32") "$d/out"
+expiring=$(mktemp -d -p "$scratch")
+cp -r "$scratch/site-3/." "$expiring/"
+suite=duke set_valid_until "$expiring" "$conf" '+2 days'
+d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" api "$d"
+check "one suite near its Valid-Until starts a re-sign" sh -c "'$root/scripts/find-runs.sh' '$(serve "$expiring")' '$two' > '$d/out'"
+check "a re-sign is printed for it" grep -qx 'resign [0-9T:-]*Z' "$d/out"
 
 cached=$(mktemp -d -p "$scratch")
 cat > "$cached/server.py" <<'PY2'

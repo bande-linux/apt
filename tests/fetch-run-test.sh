@@ -16,15 +16,18 @@ export GH_TOKEN=test FETCH_RUN_POLL=1
 # run is the push of v0.1.0 for the desktop, of weather-v0.1.0 for the apps
 # (any apps tag points at tagged, unless untagged is set) and a schedule on
 # main for the kernel. Packages are
-# made with the functions below into $d/art/ARCH, one artifact per directory.
+# made with the functions below into $d/art/SUITE-ARCH, one artifact
+# bande-debs-SUITE-ARCH per directory, at the version plus the suite's suffix.
+x='~deb14'
 desktop_debs() {
-    local d=$1 version=${2:-$desktop_version} arch
+    local d=$1 version=${2:-$desktop_version$x} suite=${3:-forky} arch
     for arch in amd64 arm64; do
-        make_deb "$d/art/$arch" bande-compositor "$version" $arch
-        make_deb "$d/art/$arch" xdg-desktop-portal-bande "$version" $arch
+        make_deb "$d/art/$suite-$arch" bande-compositor "$version" $arch
+        make_deb "$d/art/$suite-$arch" xdg-desktop-portal-bande "$version" $arch
     done
-    make_deb "$d/art/all" bande-desktop "$version" all
+    make_deb "$d/art/$suite-all" bande-desktop "$version" all
 }
+# The kernel uploads bande-debs-arm64, unsuffixed, for forky alone (for now).
 kernel_debs() {
     local d=$1 version=${2:-$kernel_version}
     make_deb "$d/art/arm64" "linux-image-$kernel_abi" "$version" arm64
@@ -34,13 +37,13 @@ kernel_debs() {
 web_version=153.6.0esr-1+bande1
 web_debs() {
     local d=$1 arch
-    for arch in amd64 arm64; do make_deb "$d/art/$arch" bande-browser "$web_version" $arch; done
-    make_deb "$d/art/all" bande-browser-l10n-sv-se "$web_version" all
+    for arch in amd64 arm64; do make_deb "$d/art/forky-$arch" bande-browser "$web_version$x" $arch; done
+    make_deb "$d/art/forky-all" bande-browser-l10n-sv-se "$web_version$x" all
 }
 apps_version=0.1.0
 apps_debs() {
-    local d=$1 app=$2 version=${3:-$apps_version} arch
-    for arch in amd64 arm64; do make_deb "$d/art/$arch" "bande-$app" "$version" $arch; done
+    local d=$1 app=$2 version=${3:-$apps_version$x} arch
+    for arch in amd64 arm64; do make_deb "$d/art/forky-$arch" "bande-$app" "$version" $arch; done
 }
 api() {
     local d=$1 repo=bande-linux/$2 base id=20 arch workflow=${workflow:-} event=${event:-} ref=${ref:-}
@@ -94,69 +97,71 @@ api() {
 }
 
 case_dir() { mktemp -d -p "$scratch"; }
-fetch() { "$root/scripts/fetch-run.sh" "$1" 7 "$2"; }
+fetch() { "$root/scripts/fetch-run.sh" "$1" 7 "$2" ${conf:+"$conf"}; }
 
 d=$(case_dir); desktop_debs "$d"; api "$d" desktop
 check "a green desktop tag run feeds main" sh -c "'$root/scripts/fetch-run.sh' desktop 7 '$d/out' | grep -qx component=main"
-check "it brings both architectures" test -e "$d/out/bande-compositor_${desktop_version}_amd64.deb" -a \
-    -e "$d/out/bande-compositor_${desktop_version}_arm64.deb"
-check "it brings the architecture-independent packages" test -e "$d/out/bande-desktop_${desktop_version}_all.deb"
-d=$(case_dir); desktop_debs "$d"; make_deb "$d/art/all" bande-archive-keyring 1.0 all; api "$d" desktop
+check "it brings both architectures" test -e "$d/out/forky/bande-compositor_${desktop_version}${x}_amd64.deb" -a \
+    -e "$d/out/forky/bande-compositor_${desktop_version}${x}_arm64.deb"
+check "it brings the architecture-independent packages" test -e "$d/out/forky/bande-desktop_${desktop_version}${x}_all.deb"
+d=$(case_dir); desktop_debs "$d"; make_deb "$d/art/forky-all" bande-archive-keyring 1.0 all; api "$d" desktop
 refuses "the desktop may not publish the keyring" "bande-archive-keyring is built by apt itself" fetch desktop "$d/out"
-d=$(case_dir); make_deb "$d/art/all" bande-dict-en 20261108 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
+d=$(case_dir); make_deb "$d/art/forky-all" bande-dict-en 20261108~deb14 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
 check "a green dictionary run feeds main" sh -c "'$root/scripts/fetch-run.sh' dict 7 '$d/out' | grep -qx component=main"
-check "it brings the packs" test -e "$d/out/bande-dict-en_20261108_all.deb"
-d=$(case_dir); make_deb "$d/art/all" bande-desktop 20261108 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
+check "it brings the packs" test -e "$d/out/forky/bande-dict-en_20261108~deb14_all.deb"
+d=$(case_dir); make_deb "$d/art/forky-all" bande-desktop 20261108 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
 refuses "a dictionary run may publish only packs" "dict does not publish" fetch dict "$d/out"
-d=$(case_dir); make_deb "$d/art/all" bande-dict-en 20261108 all; ref=dict-20261108 api "$d" desktop
+d=$(case_dir); make_deb "$d/art/forky-all" bande-dict-en 20261108~deb14 all; ref=dict-20261108 api "$d" desktop
 refuses "a dictionary tag from the release workflow is refused" "not .github/workflows/dict.yml" fetch dict "$d/out"
 l10n_debs() {
     local d=$1 package=$2 version=$3
-    make_deb "$d/art/all" "$package-l10n-sv" "$version" all
-    make_deb "$d/art/all" "$package-l10n-en-gb" "$version" all
+    make_deb "$d/art/forky-all" "$package-l10n-sv" "$version" all
+    make_deb "$d/art/forky-all" "$package-l10n-en-gb" "$version" all
 }
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
 check "a green language pack run of the desktop feeds main" sh -c "'$root/scripts/fetch-run.sh' l10n 7 '$d/out' | grep -qx component=main"
-check "it brings the packs" test -e "$d/out/bande-desktop-l10n-sv_0.1.0+l10n20261108_all.deb" -a \
-    -e "$d/out/bande-desktop-l10n-en-gb_0.1.0+l10n20261108_all.deb"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108.2; workflow=l10n.yml ref=l10n-20261108.2 api "$d" desktop
+check "it brings the packs" test -e "$d/out/forky/bande-desktop-l10n-sv_0.1.0~deb14+l10n20261108_all.deb" -a \
+    -e "$d/out/forky/bande-desktop-l10n-en-gb_0.1.0~deb14+l10n20261108_all.deb"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108.2; workflow=l10n.yml ref=l10n-20261108.2 api "$d" desktop
 check "a second language pack tag of a day is taken" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261107; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
-refuses "packs of another date than the tag are refused" "not RELEASE+l10n20261108" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261107; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+refuses "packs of another date than the tag are refused" "not RELEASE~deb14+l10n20261108" fetch l10n "$d/out"
 d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
-refuses "packs at a release's version are refused" "not RELEASE+l10n20261108" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.2.0+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+refuses "packs at a release's version are refused" "not RELEASE~deb14+l10n20261108" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.2.0~deb14+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
 refuses "packs on a release the desktop does not have are refused" "built on v0.2.0, which" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108; history=behind workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108; history=behind workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
 refuses "packs on a release off the run's history are refused" "not on the history" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108; make_deb "$d/art/all" bande-desktop 0.1.0+l10n20261108 all
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108; make_deb "$d/art/forky-all" bande-desktop 0.1.0~deb14+l10n20261108 all
 workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
 refuses "a language pack run may publish only the desktop's packs" "l10n does not publish" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108; workflow=l10n.yml ref=l10n-2026 api "$d" desktop
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108; workflow=l10n.yml ref=l10n-2026 api "$d" desktop
 refuses "a malformed language pack tag is refused" "publish l10n-YYYYMMDD tags" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108; ref=l10n-20261108 api "$d" desktop
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108; ref=l10n-20261108 api "$d" desktop
 refuses "a language pack tag from the release workflow is refused" "not .github/workflows/l10n.yml" fetch l10n "$d/out"
 
-d=$(case_dir); l10n_debs "$d" bande-weather 0.1.0+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
+d=$(case_dir); l10n_debs "$d" bande-weather 0.1.0~deb14+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
 check "a green language pack run of the apps feeds main" sh -c "'$root/scripts/fetch-run.sh' apps-l10n 7 '$d/out' | grep -qx component=main"
-check "it brings the app's packs" test -e "$d/out/bande-weather-l10n-sv_0.1.0+l10n20261108_all.deb"
-d=$(case_dir); l10n_debs "$d" bande-radio 0.1.0+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
+check "it brings the app's packs" test -e "$d/out/forky/bande-weather-l10n-sv_0.1.0~deb14+l10n20261108_all.deb"
+d=$(case_dir); l10n_debs "$d" bande-radio 0.1.0~deb14+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
 refuses "packs of an app without an apps/ directory are refused" "has no apps/radio" fetch apps-l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-clock 0.1.0+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
+d=$(case_dir); l10n_debs "$d" bande-clock 0.1.0~deb14+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
 refuses "packs on a release tag the app does not have are refused" "built on clock-v0.1.0, which" fetch apps-l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-greeter 0.1.0+l10n20261108; app_dirs=greeter released=greeter-v0.1.0 workflow=l10n.yml ref=l10n-20261108 api "$d" apps
+d=$(case_dir); l10n_debs "$d" bande-greeter 0.1.0~deb14+l10n20261108; app_dirs=greeter released=greeter-v0.1.0 workflow=l10n.yml ref=l10n-20261108 api "$d" apps
 refuses "the apps may not publish packs for the desktop's programs" "translates the desktop's bande-greeter" fetch apps-l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-weather 0.1.0+l10n20261108; make_deb "$d/art/all" bande-weather 0.1.0+l10n20261108 all; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
+d=$(case_dir); l10n_debs "$d" bande-weather 0.1.0~deb14+l10n20261108; make_deb "$d/art/forky-all" bande-weather 0.1.0~deb14+l10n20261108 all; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
 refuses "a language pack run of the apps may publish only packs" "apps-l10n does not publish" fetch apps-l10n "$d/out"
 
 d=$(case_dir); kernel_debs "$d"; api "$d" kernel
 check "a green kernel run feeds apple" sh -c "'$root/scripts/fetch-run.sh' kernel 7 '$d/out' | grep -qx component=apple"
-check "it brings the kernel" test -e "$d/out/linux-image-${kernel_abi}_${kernel_version}_arm64.deb"
+check "it brings the kernel" test -e "$d/out/forky/linux-image-${kernel_abi}_${kernel_version}_arm64.deb"
 d=$(case_dir); kernel_debs "$d"; event=workflow_dispatch api "$d" kernel
 check "a dispatched kernel run is taken" fetch kernel "$d/out"
+d=$(case_dir); kernel_debs "$d" "$kernel_version~deb14"; api "$d" kernel
+check "a kernel already carrying forky's suffix is taken" fetch kernel "$d/out"
 d=$(case_dir); web_debs "$d"; api "$d" web
-check "a green web run feeds main with the browser and its language packs" sh -c "'$root/scripts/fetch-run.sh' web 7 '$d/out' | grep -qx component=main && test -e '$d/out/bande-browser_${web_version}_arm64.deb' -a -e '$d/out/bande-browser-l10n-sv-se_${web_version}_all.deb'"
-d=$(case_dir); desktop_debs "$d" 0.1.1; ref=v0.1.1 api "$d" desktop
+check "a green web run feeds main with the browser and its language packs" sh -c "'$root/scripts/fetch-run.sh' web 7 '$d/out' | grep -qx component=main && test -e '$d/out/forky/bande-browser_${web_version}${x}_arm64.deb' -a -e '$d/out/forky/bande-browser-l10n-sv-se_${web_version}${x}_all.deb'"
+d=$(case_dir); desktop_debs "$d" 0.1.1$x; ref=v0.1.1 api "$d" desktop
 check "an annotated tag is followed to its commit" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=refs/tags/v0.1.0 api "$d" desktop
 check "a full tag ref is taken" fetch desktop "$d/out"
@@ -170,7 +175,7 @@ d=$(case_dir); desktop_debs "$d"; api "$d" desktop
 refuses "an unknown repository is refused" "unknown repository" fetch images "$d/out"
 d=$(case_dir); desktop_debs "$d"; workflow=ci.yml api "$d" desktop
 refuses "another workflow is refused" "not .github/workflows/release.yml" fetch desktop "$d/out"
-d=$(case_dir); desktop_debs "$d"; api "$d" kernel
+d=$(case_dir); make_deb "$d/art/arm64" bande-compositor "$kernel_version" arm64; api "$d" kernel
 refuses "the desktop's packages are refused from the kernel" "kernel does not publish" fetch kernel "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=main api "$d" desktop
 refuses "a desktop push to main is refused" "publishes vX.Y.Z tags" fetch desktop "$d/out"
@@ -195,7 +200,7 @@ refuses "a run that does not finish is refused" "still in_progress" env FETCH_RU
     "$root/scripts/fetch-run.sh" desktop 7 "$d/out"
 d=$(case_dir); desktop_debs "$d"; compare=diverged api "$d" desktop
 refuses "a commit off main is refused" "is not on main" fetch desktop "$d/out"
-d=$(case_dir); desktop_debs "$d" 0.1.1; api "$d" desktop
+d=$(case_dir); desktop_debs "$d" 0.1.1$x; api "$d" desktop
 refuses "packages of another version than the tag are refused" "carries version 0.1.1" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d" 0.1.0+git20261029.35.788731f; api "$d" desktop
 refuses "a main build's version under a tag is refused" "carries version" fetch desktop "$d/out"
@@ -205,26 +210,26 @@ d=$(case_dir); kernel_debs "$d" 7.2.12-1+bande2; api "$d" kernel
 refuses "kernel packages of another version than named are refused" "the run publishes 7.2.12-1+bande1" fetch kernel "$d/out"
 d=$(case_dir); kernel_debs "$d"; named='' api "$d" kernel
 refuses "a kernel run without its version artifact is refused" "names 0 versions" fetch kernel "$d/out"
-d=$(case_dir); desktop_debs "$d"; make_deb "$d/art/arm64" libc6 9.9 arm64; api "$d" desktop
+d=$(case_dir); desktop_debs "$d"; make_deb "$d/art/forky-arm64" libc6 9.9 arm64; api "$d" desktop
 refuses "a package outside the archive's names is refused" "desktop does not publish" fetch desktop "$d/out"
-d=$(case_dir); desktop_debs "$d"; rm -r "$d/art/amd64"; api "$d" desktop
-refuses "a missing architecture is refused" "no single bande-debs-amd64" fetch desktop "$d/out"
-d=$(case_dir); desktop_debs "$d"; rm "$d/art/amd64/xdg-desktop-portal-bande_"*; api "$d" desktop
+d=$(case_dir); desktop_debs "$d"; rm -r "$d/art/forky-amd64"; api "$d" desktop
+refuses "a missing architecture is refused" "no single bande-debs-forky-amd64" fetch desktop "$d/out"
+d=$(case_dir); desktop_debs "$d"; rm "$d/art/forky-amd64/xdg-desktop-portal-bande_"*; api "$d" desktop
 refuses "an incomplete architecture is refused" "incomplete architecture" fetch desktop "$d/out"
-d=$(case_dir); desktop_debs "$d"; mv "$d/art/amd64/xdg-desktop-portal-bande_"* "$d/art/arm64/"; api "$d" desktop
-refuses "a package in another architecture's artifact is refused" "bande-debs-arm64 holds xdg-desktop-portal-bande for amd64" \
+d=$(case_dir); desktop_debs "$d"; mv "$d/art/forky-amd64/xdg-desktop-portal-bande_"* "$d/art/forky-arm64/"; api "$d" desktop
+refuses "a package in another architecture's artifact is refused" "bande-debs-forky-arm64 holds xdg-desktop-portal-bande for amd64" \
     fetch desktop "$d/out"
 
 d=$(case_dir); apps_debs "$d" weather; api "$d" apps
 check "an app's tag run feeds main" sh -c "'$root/scripts/fetch-run.sh' apps 7 '$d/out' | grep -qx component=main"
-check "it brings the app for amd64 and arm64" test -e "$d/out/bande-weather_${apps_version}_amd64.deb" -a \
-    -e "$d/out/bande-weather_${apps_version}_arm64.deb"
+check "it brings the app for amd64 and arm64" test -e "$d/out/forky/bande-weather_${apps_version}${x}_amd64.deb" -a \
+    -e "$d/out/forky/bande-weather_${apps_version}${x}_arm64.deb"
 d=$(case_dir); apps_debs "$d" weather
-for arch in amd64 arm64; do make_deb "$d/art/$arch" bande-weather-l10n-sv "$apps_version" all; done; api "$d" apps
-check "an app's release brings its packs from each architecture's artifact" sh -c "'$root/scripts/fetch-run.sh' apps 7 '$d/out' && test -e '$d/out/bande-weather-l10n-sv_${apps_version}_all.deb'"
-d=$(case_dir); apps_debs "$d" weather; make_deb "$d/art/arm64" bande-clock-l10n-sv "$apps_version" all; api "$d" apps
+for arch in amd64 arm64; do make_deb "$d/art/forky-$arch" bande-weather-l10n-sv "$apps_version$x" all; done; api "$d" apps
+check "an app's release brings its packs from each architecture's artifact" sh -c "'$root/scripts/fetch-run.sh' apps 7 '$d/out' && test -e '$d/out/forky/bande-weather-l10n-sv_${apps_version}${x}_all.deb'"
+d=$(case_dir); apps_debs "$d" weather; make_deb "$d/art/forky-arm64" bande-clock-l10n-sv "$apps_version" all; api "$d" apps
 refuses "an app's release may not bring another app's packs" "apps does not publish" fetch apps "$d/out"
-d=$(case_dir); apps_debs "$d" weather; make_deb "$d/art/arm64" bande-weather-data "$apps_version" all; api "$d" apps
+d=$(case_dir); apps_debs "$d" weather; make_deb "$d/art/forky-arm64" bande-weather-data "$apps_version" all; api "$d" apps
 refuses "an app's release may bring only packs for all architectures" "holds bande-weather-data for all" fetch apps "$d/out"
 d=$(case_dir); apps_debs "$d" weather; ref=refs/tags/weather-v0.1.0 api "$d" apps
 check "a full apps tag ref is taken" fetch apps "$d/out"
@@ -248,10 +253,10 @@ d=$(case_dir); apps_debs "$d" radio; ref=radio-v0.1.0 api "$d" apps
 refuses "a tag for an app without an apps/ directory is refused" "has no apps/radio" fetch apps "$d/out"
 d=$(case_dir); apps_debs "$d" weather; apps_debs "$d" clock; api "$d" apps
 refuses "a run carrying another app is refused" "bande-clock, which apps does not publish" fetch apps "$d/out"
-d=$(case_dir); apps_debs "$d" weather; make_deb "$d/art/amd64" xdg-desktop-portal-bande "$apps_version" amd64; api "$d" apps
+d=$(case_dir); apps_debs "$d" weather; make_deb "$d/art/forky-amd64" xdg-desktop-portal-bande "$apps_version" amd64; api "$d" apps
 refuses "a desktop name outside bande-* is refused" "xdg-desktop-portal-bande, which apps does not publish" fetch apps "$d/out"
-d=$(case_dir); apps_debs "$d" weather 0.1.1; api "$d" apps
-refuses "an app of another version than its tag is refused" "carries version 0.1.1, the run publishes 0.1.0" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" weather 0.1.1$x; api "$d" apps
+refuses "an app of another version than its tag is refused" "carries version 0.1.1~deb14, the run publishes 0.1.0~deb14 for forky" fetch apps "$d/out"
 d=$(case_dir); apps_debs "$d" weather 0.1.0+git20261101.3.788731f; api "$d" apps
 refuses "a test build's +git version is refused" "carries version 0.1.0+git" fetch apps "$d/out"
 d=$(case_dir); apps_debs "$d" desktop; app_dirs=desktop ref=desktop-v0.1.0 api "$d" apps
@@ -260,21 +265,60 @@ d=$(case_dir); apps_debs "$d" greeter; app_dirs=greeter ref=greeter-v0.1.0 api "
 refuses "an app named like a desktop package directory is refused" "bande-greeter is the desktop's" fetch apps "$d/out"
 d=$(case_dir); apps_debs "$d" archive-keyring; app_dirs=archive-keyring ref=archive-keyring-v0.1.0 api "$d" apps
 refuses "an app may not publish the keyring" "built by apt itself" fetch apps "$d/out"
-d=$(case_dir); apps_debs "$d" weather; rm -r "$d/art/amd64"; api "$d" apps
-refuses "an apps run without amd64 is refused" "no single bande-debs-amd64" fetch apps "$d/out"
+d=$(case_dir); apps_debs "$d" weather; rm -r "$d/art/forky-amd64"; api "$d" apps
+refuses "an apps run without amd64 is refused" "no single bande-debs-forky-amd64" fetch apps "$d/out"
+
+# The suite suffix: every package built for a suite carries ~debNN after its release.
+d=$(case_dir); desktop_debs "$d" "$desktop_version"; api "$d" desktop
+refuses "a desktop package without the suite suffix is refused" "carries version 0.1.0, the run publishes 0.1.0~deb14 for forky" fetch desktop "$d/out"
+d=$(case_dir); desktop_debs "$d" "$desktop_version~deb15"; api "$d" desktop
+refuses "another suite's suffix is refused" "carries version 0.1.0~deb15" fetch desktop "$d/out"
+d=$(case_dir); desktop_debs "$d" "$desktop_version~deb14+1"; api "$d" desktop
+refuses "a stamp after the suffix is refused" "carries version 0.1.0~deb14+1" fetch desktop "$d/out"
+d=$(case_dir); make_deb "$d/art/forky-all" bande-dict-en 20261108 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
+refuses "dictionary packs without the suffix are refused" "the run publishes 20261108~deb14" fetch dict "$d/out"
+d=$(case_dir); for a in amd64 arm64; do make_deb "$d/art/forky-$a" bande-browser "$web_version" $a; done; api "$d" web
+refuses "a browser at its bare base version is refused" "the run publishes $web_version~deb14" fetch web "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108~deb14; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+refuses "packs with the suffix after the stamp are refused" "not RELEASE~deb14+l10n20261108" fetch l10n "$d/out"
+d=$(case_dir); make_deb "$d/art/amd64" bande-compositor "$desktop_version" amd64; api "$d" desktop
+refuses "a run with no suite's artifacts is refused" "no bande-debs-SUITE-ARCH artifacts for any suite of conf/suites: forky" fetch desktop "$d/out"
+
+# Two suites: each takes its own artifacts at its own suffix.
+two=$scratch/two-suites
+mkdir -p "$two" && printf 'forky\nduke\n' > "$two/suites"
+d=$(case_dir); desktop_debs "$d"; api "$d" desktop
+check "a run built before a suite was listed is taken" sh -c "'$root/scripts/fetch-run.sh' desktop 7 '$d/out' '$two' 2> '$d/log'"
+check "it feeds the suite it built for" test -e "$d/out/forky/bande-desktop_0.1.0~deb14_all.deb"
+check "and leaves the other alone" test ! -e "$d/out/duke"
+check "saying so" grep -q 'run 7 built nothing for duke; it stays as it is' "$d/log"
+d=$(case_dir); desktop_debs "$d"; desktop_debs "$d" 0.1.0~deb15 duke; api "$d" desktop
+check "a run of both suites is taken" "$root/scripts/fetch-run.sh" desktop 7 "$d/out" "$two"
+check "forky gets ~deb14" test -e "$d/out/forky/bande-compositor_0.1.0~deb14_arm64.deb"
+check "duke gets ~deb15" test -e "$d/out/duke/bande-compositor_0.1.0~deb15_arm64.deb" -a ! -e "$d/out/duke/bande-compositor_0.1.0~deb14_arm64.deb"
+d=$(case_dir); desktop_debs "$d"; desktop_debs "$d" 0.1.0~deb14 duke; api "$d" desktop
+refuses "forky's packages under duke's artifacts are refused" "the run publishes 0.1.0~deb15 for duke" \
+    "$root/scripts/fetch-run.sh" desktop 7 "$d/out" "$two"
+d=$(case_dir); desktop_debs "$d"; for a in amd64 arm64; do make_deb "$d/art/duke-$a" bande-compositor 0.1.0~deb15 $a; done; api "$d" desktop
+refuses "a suite missing one of its artifacts is refused" "no single bande-debs-duke-all" "$root/scripts/fetch-run.sh" desktop 7 "$d/out" "$two"
+d=$(case_dir); make_deb "$d/art/duke-all" bande-desktop-l10n-sv 0.1.0~deb15+l10n20261108 all; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+check "duke's packs carry ~deb15 before the stamp" "$root/scripts/fetch-run.sh" l10n 7 "$d/out" "$two"
+check "and go to duke alone" sh -c "test -e '$d/out/duke/bande-desktop-l10n-sv_0.1.0~deb15+l10n20261108_all.deb' && test ! -e '$d/out/forky'"
+d=$(case_dir); kernel_debs "$d"; api "$d" kernel
+check "the kernel still feeds forky alone" sh -c "'$root/scripts/fetch-run.sh' kernel 7 '$d/out' '$two' && test -e '$d/out/forky/bande-os-apple_${kernel_version}_arm64.deb' && test ! -e '$d/out/duke'"
 
 merged=$(case_dir)/out
-d=$(case_dir); apps_debs "$d" weather 0.2.0; ref=weather-v0.2.0 api "$d" apps
+d=$(case_dir); apps_debs "$d" weather 0.2.0$x; ref=weather-v0.2.0 api "$d" apps
 check "a weather run merges" fetch apps "$merged"
 d=$(case_dir); apps_debs "$d" clock; ref=clock-v0.1.0 api "$d" apps
 check "a clock run merges" fetch apps "$merged"
 d=$(case_dir); apps_debs "$d" weather; api "$d" apps
 check "an older weather run merges" fetch apps "$merged"
-check "the newer weather is kept" test -e "$merged/bande-weather_0.2.0_arm64.deb"
-check "the older weather is not added" test ! -e "$merged/bande-weather_0.1.0_arm64.deb"
-check "clock stays" test -e "$merged/bande-clock_0.1.0_amd64.deb"
-d=$(case_dir); apps_debs "$d" weather 0.3.0; apps_debs "$d" radio 0.3.0; ref=weather-v0.3.0 api "$d" apps
+check "the newer weather is kept" test -e "$merged/forky/bande-weather_0.2.0~deb14_arm64.deb"
+check "the older weather is not added" test ! -e "$merged/forky/bande-weather_0.1.0~deb14_arm64.deb"
+check "clock stays" test -e "$merged/forky/bande-clock_0.1.0~deb14_amd64.deb"
+d=$(case_dir); apps_debs "$d" weather 0.3.0$x; apps_debs "$d" radio 0.3.0$x; ref=weather-v0.3.0 api "$d" apps
 refuses "a refused run adds nothing" "apps does not publish" fetch apps "$merged"
-check "nothing of it reached the merge" sh -c "! ls '$merged' | grep -q '0.3.0\|radio'"
+check "nothing of it reached the merge" sh -c "! ls -R '$merged' | grep -q '0.3.0\|radio'"
 
 finish
