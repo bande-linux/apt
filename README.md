@@ -13,7 +13,7 @@ and the key fingerprint, styled by the website's `/style.css`.
 
 One suite per Debian release, named by its codename. [`conf/suites`](conf/suites) lists them, one
 per line, and is the only list: the source repositories read it from `main` to build their
-matrix, and every publish rebuilds each suite it lists. Today it lists `forky` (Debian 14).
+matrix, and every publish rebuilds each suite it lists. It lists `forky` (Debian 14).
 Each suite has one component, `main`, and the suites share one pool:
 
 | Component | Architectures | Fed by | Names |
