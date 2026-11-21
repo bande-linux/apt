@@ -180,6 +180,9 @@ same releases.
      other addition, a pack at `<release>+l10n<stamp>` goes in only while the package it
      `Enhances` is at `<release>`: one built on an older release, or on one not published, is
      skipped, so a translation-only build never replaces a newer release's packs;
+   - an apps package whose `apps/<app>` directory is gone from the apps' `main` (`--apps-dirs`,
+     which every publish passes) leaves the archive with its packs, as Debian drops the binaries
+     a source no longer builds; a renamed app publishes under its new name only;
    - it refuses a name that `state/owners` gives to another source;
    - reprepro builds the pool and the `Packages` indexes; `apt-ftparchive release` writes each
      suite's `Release` with SHA256 sums, `Acquire-By-Hash: yes` and `Valid-Until` 14 days out, and copies every index to
@@ -215,11 +218,12 @@ own. For up to ten minutes after a publish it can serve a new `InRelease` beside
   `dists/<suite>/<component>/binary-<arch>/by-hash/SHA256/<sha256>`. That path never changes
   content, so apt (and `find-runs.sh` and `rebuild.sh`) always get the index that the
   `InRelease` they hold names.
-- apt-ftparchive keeps the newest 3 generations (`By-Hash-Keep`) in each by-hash directory, so a
-  client holding an `InRelease` from an earlier publish still finds its indexes. Pages cannot
-  list a directory and every publish builds the site afresh, so the site lists the by-hash files
-  with their times in `state/by-hash`, and the next publish restores them from the live site
-  before apt-ftparchive prunes.
+- Each by-hash directory keeps the newest 3 generations, so a client holding an `InRelease` from
+  an earlier publish still finds its indexes. `rebuild.sh` prunes them itself, by mtime, since
+  apt-ftparchive's `By-Hash-Keep` skips the first directory of a suite. Pages cannot list a
+  directory and every publish builds the site afresh, so the site lists the by-hash files with
+  their times in `state/by-hash`, and the next publish restores them from the live site before
+  pruning.
 - Files a publish replaces (`InRelease`, `key.asc`, `state/*`) are read with
   [`scripts/fetch-fresh.sh`](scripts/fetch-fresh.sh). The CDN ignores the query string, so
   `?nonce` does not get past it, but it keys on the literal path, which Pages decodes: the

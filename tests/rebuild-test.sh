@@ -327,6 +327,24 @@ refuses "packs that enhance no single package are refused" "not one package" reb
     --add-l10n desktop:main="$(enhances='bande-desktop, bande-shell' make_deb "$scratch/in-l6/forky" bande-desktop-l10n-sv 0.1.0+l10n20261111 all; echo "$scratch/in-l6")" \
     --out "$scratch/l6"
 
+# --apps-dirs: an apps package whose apps/ directory is gone leaves the archive.
+for a in amd64 arm64; do
+    make_deb "$scratch/in-r0/forky" bande-viewer 0.1.0~deb14 $a
+    make_deb "$scratch/in-r0/forky" bande-clock 0.1.0~deb14 $a
+done
+packs "$scratch/in-r0" bande-viewer 0.1.0~deb14
+check "two apps" rebuild --live "$(serve "$empty")" --add-each apps:main="$scratch/in-r0" \
+    --add-each apt:main="$scratch/in-apt" --out "$scratch/r0"
+check "a publish with one of their directories left" sh -c "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/r0")' \
+    --add-each apt:main='$scratch/in-apt' --apps-dirs 'clock weather' --out '$scratch/r1' > '$scratch/r1.log'"
+check "keeps that app" both "$scratch/r1" main bande-clock=0.1.0~deb14
+check "drops the other with its packs" sh -c "! grep -q '^Package: bande-viewer' '$scratch/r1/dists/forky/main/binary-amd64/Packages' &&
+    ! find '$scratch/r1/pool' -name 'bande-viewer*' | grep -q . && ! grep -q '^bande-viewer' '$scratch/r1/state/owners'"
+check "saying so" grep -q 'the apps no longer build bande-viewer-l10n-sv; dropping it from forky/main' "$scratch/r1.log"
+check "and keeps the other sources' packages" both "$scratch/r1" main bande-archive-keyring=1.0
+refuses "an empty list is refused" "lists no apps/ directory" rebuild --live "$(serve "$scratch/r0")" \
+    --add-each apt:main="$scratch/in-apt" --apps-dirs '' --out "$scratch/r2"
+
 # Two suites: duke is added beside the live forky, which carries unsuffixed
 # packages from before the suites had suffixes.
 two=$scratch/two-conf

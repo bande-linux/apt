@@ -1,6 +1,6 @@
 #!/bin/bash
 # Usage: rebuild.sh --live URL --add|--add-each|--add-l10n SOURCE:COMPONENT=DIR [...] --out DIR
-#                   [--processed SOURCE=ID,...] [--conf DIR] [--cache DIR]
+#                   [--processed SOURCE=ID,...] [--apps-dirs "DIR ..."] [--conf DIR] [--cache DIR]
 # Rebuilds the whole archive, every suite conf/suites lists, from the live,
 # signature-checked site plus the packages in each DIR/SUITE, which come from
 # the repository SOURCE and go to its COMPONENT of SUITE, signs
@@ -22,15 +22,18 @@
 #
 # The site also keeps state/owners, the source each package comes from: a
 # package of another source's name is refused, unless conf/handovers moves it:
-# "PACKAGE FROM TO" gives a name FROM published to TO. And state/processed, the runs
+# "PACKAGE FROM TO" gives a name FROM published to TO. With --apps-dirs "DIR
+# ...", the apps/ directories on the apps' main, an apps package of no such
+# directory leaves the archive. And state/processed, the runs
 # of each source already taken (--processed adds to it), which find-runs.sh
 # reads.
 #
 # Release is written by apt-ftparchive, with Acquire-By-Hash: every index is
 # also published under by-hash/SHA256/<sha256>, which never changes, so a client
 # holding any InRelease the Pages CDN served finds the matching indexes.
-# apt-ftparchive keeps the last $by_hash_keep generations of them in each
-# directory; state/by-hash lists them, since Pages cannot list a directory, and
+# Each by-hash directory keeps the last $by_hash_keep generations of them
+# (pruned here: apt-ftparchive's By-Hash-Keep skips a suite's first directory);
+# state/by-hash lists them, since Pages cannot list a directory, and
 # the next publish restores them from the live site. Mutable files (InRelease,
 # state) are read past the CDN with fetch-fresh.sh, indexes by hash.
 #
@@ -62,6 +65,7 @@ while [ $# -gt 0 ]; do
         --add-each) batches+=("each $2"); shift 2 ;;
         --add-l10n) batches+=("l10n $2"); shift 2 ;;
         --processed) processed+=("$2"); shift 2 ;;
+        --apps-dirs) apps_dirs=$2; shift 2 ;;
         --out) out=$2; shift 2 ;;
         --conf) conf=$2; shift 2 ;;
         --cache) cache=$2; shift 2 ;;
@@ -97,6 +101,8 @@ for batch in "${batches[@]}"; do
     component=${batch#*:} component=${component%%=*}
     [[ " $components " == *" $component "* ]] || fail "the archive has no component $component"
 done
+dirs_pattern='^[a-z0-9][a-z0-9 -]*$'
+[[ ${apps_dirs-x} =~ $dirs_pattern ]] || fail "--apps-dirs \"${apps_dirs-}\" lists no apps/ directory"
 for entry in "${processed[@]}"; do
     [[ $entry =~ ^[a-z0-9-]+=[0-9]+(,[0-9]+)*$ ]] || fail "--processed $entry is not SOURCE=ID,..."
 done
@@ -163,7 +169,8 @@ for suite in $suites; do
     live_suites+=" $suite"
     gpgv --quiet --keyring "$work/keyring.gpg" --output "$dist/Release" "$dist/InRelease" 2>/dev/null ||
         fail "$suite/InRelease is not signed by the archive key"
-    for c in $(awk '/^Components:/ { $1 = ""; print; exit }' "$dist/Release"); do
+    read -ra live_components < <(awk '/^Components:/ { $1 = ""; print; exit }' "$dist/Release")
+    for c in "${live_components[@]}"; do
         [[ " $components " == *" $c "* ]] || echo "rebuild: $suite/$c is no longer a component; dropping it"
     done
     for c in $components; do
@@ -302,6 +309,21 @@ while read -r mode c package arch version deb; do
     [ "$mode" != l10n ] || add "$mode" "$c" "$package" "$arch" "$version" "$deb"
 done < "$work/new"
 
+# --apps-dirs: the apps/ directories on the apps' main. An apps package of none
+# of them (bande-DIR or its packs bande-DIR-l10n-*) leaves the archive, as Debian
+# drops the binaries a source no longer builds.
+if [ -n "${apps_dirs+set}" ]; then
+    awk -v dirs="$apps_dirs" 'BEGIN { n = split(dirs, d, " "); for (i = 1; i <= n; i++) built["bande-" d[i]] = 1 }
+        FILENAME == ARGV[1] { if ($2 == "apps") apps[$1] = 1; next }
+        { name = $2; sub(/-l10n-.*/, "", name) }
+        ($2 in apps) && !(name in built) { print $1, $2 > "/dev/stderr"; next } { print }' \
+        "$work/claims" "$work/rows" 2> "$work/dropped" > "$work/kept"
+    mv "$work/kept" "$work/rows"
+    sort -u "$work/dropped" | while read -r c package; do
+        echo "rebuild: the apps no longer build $package; dropping it from $c"
+    done
+fi
+
 mkdir -p "$work/repo/conf"
 for suite in $suites; do stanza "$suite"; echo; done > "$work/repo/conf/distributions"
 cp "$conf/options" "$work/repo/conf/options"
@@ -344,8 +366,10 @@ sort -k2,2 -u "$work/by-hash" | while read -r mtime path; do
 done
 
 # Each suite's Release, by apt-ftparchive: SHA256 sums, Acquire-By-Hash,
-# Valid-Until $valid_days days out, and by-hash copies of every index, keeping
-# the newest $by_hash_keep generations in each directory.
+# Valid-Until $valid_days days out, and by-hash copies of every index. Each
+# by-hash directory then keeps the files of its newest $by_hash_keep
+# generations, a generation being one file per index beside it; apt-ftparchive
+# prunes only some directories, depending on their order, so it prunes none.
 signers=()
 for key in $signing_keys; do signers+=(--local-user "$key"); done
 for suite in $suites; do
@@ -356,9 +380,14 @@ for suite in $suites; do
     done
     (cd "$public/$suite" && apt-ftparchive "${release_options[@]}" -o APT::FTPArchive::DoByHash=true \
         -o APT::FTPArchive::Release::ValidTime=$((valid_days * 86400)) \
-        -o APT::FTPArchive::By-Hash-Keep="$by_hash_keep" -o APT::FTPArchive::MD5=false \
+        -o APT::FTPArchive::By-Hash-Keep=1000000 -o APT::FTPArchive::MD5=false \
         -o APT::FTPArchive::SHA1=false -o APT::FTPArchive::SHA512=false release . > "$work/Release")
     mv "$work/Release" "$public/$suite/Release"
+    find "$public/$suite" -type d -path '*/by-hash/SHA256' | while read -r dir; do
+        indexes=$(find "${dir%/by-hash/SHA256}" -maxdepth 1 -type f -name 'Packages*' | wc -l)
+        find "$dir" -type f -printf '%T@ %p\n' | sort -rn | tail -n +$((indexes * by_hash_keep + 1)) |
+            cut -d' ' -f2- | xargs -r rm --
+    done
     gpg --batch --yes --digest-algo SHA512 "${signers[@]}" --clearsign -o "$public/$suite/InRelease" "$public/$suite/Release"
     gpg --batch --yes --digest-algo SHA512 "${signers[@]}" --armor --detach-sign -o "$public/$suite/Release.gpg" \
         "$public/$suite/Release"

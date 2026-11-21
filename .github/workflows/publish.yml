@@ -151,6 +151,10 @@ jobs:
           if [ ${#apps[@]} -gt 0 ]; then
             printf -- '--processed\napps=%s\n' "$(IFS=,; echo "${apps[*]}")" >> adds
           fi
+          # An apps package whose apps/ directory is gone from the apps' main leaves the archive.
+          dirs=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" 'https://api.github.com/repos/bande-linux/apps/contents/apps?ref=main' |
+            jq -r '.[] | select(.type == "dir") | .name' | paste -sd ' ')
+          printf -- '--apps-dirs\n%s\n' "$dirs" >> adds
           echo "refused=$(paste -sd, refused)" >> "$GITHUB_OUTPUT"
 
       - name: Restore the pool cache (actions/cache v6)
