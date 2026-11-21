@@ -9,7 +9,6 @@ on:
 
 permissions: {}
 
-# Container jobs would default to sh; the steps are bash.
 defaults:
   run:
     shell: bash
@@ -121,7 +120,6 @@ jobs:
           while read -r repo run; do
             [ "$repo" != apt ] && [ "$repo" != resign ] || continue
             if [ "$repo" = l10n ] || [ "$repo" = apps-l10n ]; then
-              # Packs go in only for the release they were built on, and the run is taken either way.
               owner=desktop
               [ "$repo" = l10n ] || owner=apps
               if env -u GITHUB_OUTPUT scripts/fetch-run.sh "$repo" "$run" "debs-$repo" < /dev/null; then
@@ -151,7 +149,6 @@ jobs:
           if [ ${#apps[@]} -gt 0 ]; then
             printf -- '--processed\napps=%s\n' "$(IFS=,; echo "${apps[*]}")" >> adds
           fi
-          # An apps package whose apps/ directory is gone from the apps' main leaves the archive.
           dirs=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" 'https://api.github.com/repos/bande-linux/apps/contents/apps?ref=main' |
             jq -r '.[] | select(.type == "dir") | .name' | paste -sd ' ')
           printf -- '--apps-dirs\n%s\n' "$dirs" >> adds
@@ -228,9 +225,8 @@ jobs:
       - name: Check out (actions/checkout v7)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Install the tools
+      - name: Install the tools, with gh from unstable
         run: |
-          # gh is held out of forky by release-critical bugs, so it comes from unstable.
           printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: unstable\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.pgp\n' \
               > /etc/apt/sources.list.d/unstable.sources
           printf 'Package: *\nPin: release a=unstable\nPin-Priority: 100\n' > /etc/apt/preferences.d/unstable
@@ -272,7 +268,6 @@ jobs:
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends ca-certificates curl gpg
           gpg --batch --dearmor < conf/archive-key.asc > /tmp/archive.gpg
-          # Past the Pages CDN, which may still serve the previous key.asc.
           [ "$(scripts/fetch-fresh.sh https://bande-linux.github.io/apt key.asc /tmp/live-key.asc)" = 200 ]
           gpg --batch --dearmor < /tmp/live-key.asc > /tmp/live.gpg
           cmp /tmp/archive.gpg /tmp/live.gpg

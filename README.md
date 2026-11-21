@@ -5,8 +5,9 @@ The APT repository for the Bande desktop, served by GitHub Pages at
 signs the published site. The site itself is deployed as a Pages artifact and is not stored in
 git.
 
-Install instructions for users are on the site ([`site/index.html`](site/index.html)), styled by
-the website's `/style.css`.
+Install instructions for users are on the website at <https://bande-linux.github.io/debian/>. The
+archive's own page ([`site/index.html`](site/index.html)) links there and shows the source stanza
+and the key fingerprint, styled by the website's `/style.css`.
 
 ## The archive
 

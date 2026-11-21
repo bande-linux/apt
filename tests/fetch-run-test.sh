@@ -250,7 +250,6 @@ refuses "an app may not publish the keyring" "built by apt itself" fetch apps "$
 d=$(case_dir); apps_debs "$d" weather; rm -r "$d/art/forky-amd64"; api "$d" apps
 refuses "an apps run without amd64 is refused" "no single bande-debs-forky-amd64" fetch apps "$d/out"
 
-# The suite suffix: every package built for a suite carries ~debNN after its release.
 d=$(case_dir); desktop_debs "$d" "$desktop_version"; api "$d" desktop
 refuses "a desktop package without the suite suffix is refused" "carries version 0.1.0, the run publishes 0.1.0~deb14 for forky" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d" "$desktop_version~deb15"; api "$d" desktop
@@ -266,7 +265,6 @@ refuses "packs with the suffix after the stamp are refused" "not RELEASE~deb14+l
 d=$(case_dir); make_deb "$d/art/amd64" bande-compositor "$desktop_version" amd64; api "$d" desktop
 refuses "a run with no suite's artifacts is refused" "no bande-debs-SUITE-ARCH artifacts for any suite of conf/suites: forky" fetch desktop "$d/out"
 
-# Two suites: each takes its own artifacts at its own suffix.
 two=$scratch/two-suites
 mkdir -p "$two" && printf 'forky\nduke\n' > "$two/suites"
 d=$(case_dir); desktop_debs "$d"; api "$d" desktop

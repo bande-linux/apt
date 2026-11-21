@@ -17,30 +17,17 @@ p.lead { color: var(--muted); margin-top: 0; }
 One suite per Debian release, named by its codename; today <code>forky</code>.</p>
 
 <h2>Install</h2>
-<p>On Debian 14 (forky). The packages are built against forky and do not install on Debian 13 (trixie).</p>
-<p>1. Download the keyring and your Debian release's source package from the latest GitHub
-release, and install both:</p>
-<pre><code>cd /tmp
-suite=$(. /etc/os-release && echo "$VERSION_CODENAME")
-wget https://github.com/bande-linux/apt/releases/latest/download/bande-archive-keyring.deb \
-     "https://github.com/bande-linux/apt/releases/latest/download/bande-apt-source-$suite.deb"
-sudo apt install ./bande-archive-keyring.deb "./bande-apt-source-$suite.deb"</code></pre>
-<p>This adds <code>/etc/apt/sources.list.d/bande.sources</code>:</p>
+<p>The install steps are at <a href="https://bande-linux.github.io/debian/">bande-linux.github.io/debian</a>.
+They add <code>/etc/apt/sources.list.d/bande.sources</code>:</p>
 <pre><code>Types: deb
 URIs: https://bande-linux.github.io/apt
 Suites: forky
 Components: main
 Signed-By: /usr/share/keyrings/bande-archive-keyring.pgp</code></pre>
-<p>2. Install the desktop:</p>
-<pre><code>sudo apt update
-sudo apt install bande-desktop</code></pre>
-<p>This installs the whole system: the desktop, its login window, NetworkManager, PipeWire and
-the everyday apps. If another display manager is installed, apt asks which one to start. Updates
-arrive with <code>sudo apt upgrade</code>.</p>
 
 <h2>Packages</h2>
 <p>The one component, <code>main</code> (amd64, arm64), holds the desktop, the browser, the
-repository packages and the optional apps, each installed on its own with
+repository packages and the apps, each installed on its own with
 <code>sudo apt install bande-&lt;name&gt;</code>.</p>
 
 <h2>Remove</h2>
@@ -51,7 +38,7 @@ repository packages and the optional apps, each installed on its own with
 (<a href="key.asc">key.asc</a>), fingerprint:</p>
 <pre><code class="fpr">@FINGERPRINT@</code></pre>
 <p>If a machine was offline through a key change and <code>apt update</code> reports a signature
-error, repeat step 1.</p>
+error, repeat the first install step.</p>
 </main>
 </body>
 </html>

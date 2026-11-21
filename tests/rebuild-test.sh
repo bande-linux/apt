@@ -123,15 +123,9 @@ check "one publish takes a desktop and a browser" rebuild --live "$live" --add d
 check "main takes the desktop" both "$scratch/both" main bande-compositor=0.0.0+git20261031.5.eeeeeee
 check "and the browser" both "$scratch/both" main bande-browser=153.6.0esr-1+bande1
 check "the oldest generation's indexes leave by hash" test ! -e "$(by_hash "$scratch/site-1" main/binary-amd64/Packages.xz | sed "s|site-1|both|")"
-# apt-ftparchive keeps the newest by-hash files by mtime. The live Release's Date
-# has whole seconds, so two quick publishes tie on it; the exact times in
-# state/by-hash must win, even when the Date is later (here, every listed file
-# is 100 seconds older than written).
 early=$(mktemp -d -p "$scratch")
 cp -r "$site/." "$early/"
 live_xz=forky/main/binary-amd64/by-hash/SHA256/$(basename "$(by_hash "$site" main/binary-amd64/Packages.xz)")
-# Shift the whole seconds only: awk would print the time through OFMT, which
-# mawk 1.3.4 20250131 renders as 1.79363e+09 and later mawk truncates.
 while read -r mtime path; do
     seconds=${mtime%%.*}
     echo "$((seconds - 100))${mtime#"$seconds"} $path"
@@ -196,8 +190,6 @@ check "the arm64 packages carry over" has "$scratch/grown" main arm64 "bande-com
 check "the new architecture starts empty" lacks "$scratch/grown" main amd64 "bande-compositor=$d1"
 check "and takes the new packages" both "$scratch/grown" main bande-archive-keyring=1.0
 
-# A component conf/distribution.in no longer lists leaves the site: the live
-# site has main and extra, the archive main alone.
 old_conf=$scratch/old-conf
 cp -r "$conf" "$old_conf"
 sed -i 's/^Components: .*/Components: main extra/' "$old_conf/distribution.in"
@@ -271,7 +263,6 @@ Dir::Cache::Archives "$lists/archives";
 Dir::State::status "$lists/status";
 Debug::NoLocking "true";
 EOF
-# Served with the plain indexes of a publish ago: apt reads them by hash.
 cat > "$lists/sources.d/bande.sources" <<EOF
 Types: deb
 URIs: $(serve "$(stale "$site" "$scratch/site-3")")
@@ -286,7 +277,6 @@ check "apt downloads from it" "${apt_env[@]}" apt-get install -y -q --download-o
 check "apt downloads the keyring from it" "${apt_env[@]}" apt-get install -y -q --download-only bande-archive-keyring bande-apt-source
 check "the download is the newest build" test -e "$lists/archives/bande-compositor_0.0.0+git20261030.4.bbbbbb4_${host_arch}.deb"
 
-# Language packs of an l10n tag go in only for the release they were built on.
 packs() { local p; for p in sv en-gb; do enhances=$2 make_deb "$1/forky" "$2-l10n-$p" "$3" all; done; }
 make_deb "$scratch/in-l0/forky" bande-desktop 0.1.0 all
 packs "$scratch/in-l0" bande-desktop 0.1.0
@@ -322,7 +312,6 @@ refuses "packs that enhance no single package are refused" "not one package" reb
     --add-l10n desktop:main="$(enhances='bande-desktop, bande-shell' make_deb "$scratch/in-l6/forky" bande-desktop-l10n-sv 0.1.0+l10n20261111 all; echo "$scratch/in-l6")" \
     --out "$scratch/l6"
 
-# --apps-dirs: an apps package whose apps/ directory is gone leaves the archive.
 for a in amd64 arm64; do
     make_deb "$scratch/in-r0/forky" bande-viewer 0.1.0~deb14 $a
     make_deb "$scratch/in-r0/forky" bande-clock 0.1.0~deb14 $a
@@ -340,8 +329,8 @@ check "and keeps the other sources' packages" both "$scratch/r1" main bande-arch
 refuses "an empty list is refused" "lists no apps/ directory" rebuild --live "$(serve "$scratch/r0")" \
     --add-each apt:main="$scratch/in-apt" --apps-dirs '' --out "$scratch/r2"
 
-# Two suites: duke is added beside the live forky, which carries unsuffixed
-# packages from before the suites had suffixes.
+# Two suites: duke is added beside the live forky, which serves packages
+# without a ~debNN suffix.
 two=$scratch/two-conf
 cp -r "$conf" "$two" && printf 'forky\nduke\n' > "$two/suites"
 in_suite() { local d=$scratch/in-$1/$2; shift 2; make_deb "$d" "$@"; }
@@ -351,7 +340,7 @@ check "a publish with two suites" bash -c "\"\$0\" \"\$@\" > '$scratch/two.log' 
 check "a suite added to conf/suites starts empty" grep -q 'serves no duke yet; it starts empty' "$scratch/two.log"
 check "it gets its own Release, signed" gpgv --keyring "$conf/keyring.gpg" "$scratch/two/dists/duke/InRelease"
 check "named after it" sh -c "grep -qx 'Codename: duke' '$scratch/two/dists/duke/Release' && grep -qx 'Suite: duke' '$scratch/two/dists/duke/Release' && grep -q '^Description: Bande for Debian 15 (duke)' '$scratch/two/dists/duke/Release'"
-check "forky keeps its unsuffixed packages" diff <(listed "$site" main arm64 | tr ' ' '\n' | grep -v '^bande-a') \
+check "forky keeps its packages without a ~debNN suffix" diff <(listed "$site" main arm64 | tr ' ' '\n' | grep -v '^bande-a') \
     <(listed "$scratch/two" main arm64 | tr ' ' '\n' | grep -v '^bande-a')
 check "a run with forky packages alone leaves duke without them" lacks "$scratch/two" main arm64 bande-desktop=0.0.0+git20261030.4.bbbbbb4 duke
 check "each suite has its own source package" bash -c "$(declare -f listed has both); both '$scratch/two' main bande-apt-source=1.1~deb14 && both '$scratch/two' main bande-apt-source=1.1~deb15 duke"

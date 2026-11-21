@@ -25,9 +25,8 @@ jobs:
       actions: write
       contents: write
     steps:
-      - name: Install git, so the checkout carries the history
+      - name: Install git, so the checkout carries the history, and gh from unstable
         run: |
-          # gh is held out of forky by release-critical bugs, so it comes from unstable.
           printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: unstable\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.pgp\n' \
               > /etc/apt/sources.list.d/unstable.sources
           printf 'Package: *\nPin: release a=unstable\nPin-Priority: 100\n' > /etc/apt/preferences.d/unstable
@@ -70,7 +69,6 @@ jobs:
               names+=("$repo $ref")
             fi
           done < runs
-          # Only a Valid-Until near its end: the publish rebuilds and re-signs as it is.
           if [ ${#names[@]} -eq 0 ]; then
             title="Re-sign the archive"
           else

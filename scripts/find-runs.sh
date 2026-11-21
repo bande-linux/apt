@@ -135,7 +135,6 @@ live_version() {
 
 newer() { [ -z "$2" ] || dpkg --compare-versions "$1" gt "$2"; }
 
-# The keyring carries no suffix; every suite must have it at $APT_VERSION.
 if [ -n "${APT_VERSION:-}" ]; then
     behind=''
     for suite in $suites; do

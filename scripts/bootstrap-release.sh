@@ -15,7 +15,6 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 version() { dpkg-deb --show --showformat="\${Version}" "$1"; }
 
-# The keyring is the same for every suite: DIR may hold copies of it.
 mapfile -t keyrings < <(find "$dir" -name 'bande-archive-keyring_*_all.deb' | sort)
 [ ${#keyrings[@]} -gt 0 ] || fail "expected a bande-archive-keyring package in $dir"
 for keyring in "${keyrings[@]}"; do

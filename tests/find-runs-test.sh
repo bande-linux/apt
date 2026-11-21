@@ -212,8 +212,6 @@ check "new repository packages are found" sh -c "APT_VERSION=1.1 '$root/scripts/
 check "published repository packages are not" sh -c "APT_VERSION=1.0 '$root/scripts/find-runs.sh' '$live' '$conf' > '$d/out' && test ! -s '$d/out'"
 check "an empty site takes the repository packages" sh -c "APT_VERSION=1.0 '$root/scripts/find-runs.sh' '$(serve "$empty")' '$conf' | grep -qx 'apt 1.0'"
 
-# Right after a publish the Pages CDN can serve the new InRelease beside the
-# old Packages.xz; the index is read by hash, so it still resolves.
 for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop-2/forky" $p 0.2.0 all; done
 "$root/scripts/rebuild.sh" --conf "$conf" --live "$live" --add desktop:main="$scratch/desktop-2" --out "$scratch/site-2" > /dev/null
 stale=$(mktemp -d -p "$scratch")
@@ -223,8 +221,6 @@ d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" api "$d"
 check "a stale Packages.xz beside a new InRelease resolves by hash" find_runs "$d/out" "$(serve "$stale")"
 check "the published desktop is not found again" test ! -s "$d/out"
 
-# Valid-Until: under 7 days left, or none, starts a re-sign; a past one is
-# refused, since it may be an old InRelease replayed.
 d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" api "$d"
 check "a fresh InRelease is no re-sign" find_runs "$d/out"
 check "nothing is printed for it" test ! -s "$d/out"
