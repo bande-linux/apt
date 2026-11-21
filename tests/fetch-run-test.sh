@@ -5,17 +5,15 @@
 sha=788731fba292303f508c4dddda080bafd65aba29
 other=1111111111111111111111111111111111111111
 desktop_version=0.1.0
-kernel_version=7.2.12-1+bande1
-kernel_abi=7.2.12-apple-arm64-16k
 export GH_TOKEN=test FETCH_RUN_POLL=1
 
 # Run 7 of a source repository, served as the GitHub API. Settings, all
 # optional: event, ref, status, conclusion, compare, workflow, tagged (the
 # commit tag v0.1.0 points at; v0.1.1 is annotated and points at the run's
-# commit), named (the kernel's bande-version-NAMED artifact; empty: none). The
-# run is the push of v0.1.0 for the desktop, of weather-v0.1.0 for the apps
-# (any apps tag points at tagged, unless untagged is set) and a schedule on
-# main for the kernel. Packages are
+# commit), named (web's bande-version-NAMED artifact; empty: none). The run is
+# the push of v0.1.0 for the desktop, of weather-v0.1.0 for the apps (any apps
+# tag points at tagged, unless untagged is set) and a schedule on main for web.
+# Packages are
 # made with the functions below into $d/art/SUITE-ARCH, one artifact
 # bande-debs-SUITE-ARCH per directory, at the version plus the suite's suffix.
 x='~deb14'
@@ -27,18 +25,11 @@ desktop_debs() {
     done
     make_deb "$d/art/$suite-all" bande-desktop "$version" all
 }
-# The kernel uploads bande-debs-arm64, unsuffixed, for forky alone (for now).
-kernel_debs() {
-    local d=$1 version=${2:-$kernel_version}
-    make_deb "$d/art/arm64" "linux-image-$kernel_abi" "$version" arm64
-    make_deb "$d/art/arm64" linux-image-apple-arm64-16k "$version" arm64
-    make_deb "$d/art/arm64" bande-os-apple "$version" arm64
-}
 web_version=153.6.0esr-1+bande1
 web_debs() {
-    local d=$1 arch
-    for arch in amd64 arm64; do make_deb "$d/art/forky-$arch" bande-browser "$web_version$x" $arch; done
-    make_deb "$d/art/forky-all" bande-browser-l10n-sv-se "$web_version$x" all
+    local d=$1 version=${2:-$web_version$x} arch
+    for arch in amd64 arm64; do make_deb "$d/art/forky-$arch" bande-browser "$version" $arch; done
+    make_deb "$d/art/forky-all" bande-browser-l10n-sv-se "$version" all
 }
 apps_version=0.1.0
 apps_debs() {
@@ -84,12 +75,8 @@ api() {
         jq --arg n "bande-debs-$(basename "$arch")" --argjson i "$id" '.artifacts += [{id: $i, name: $n}]' \
             "$base/actions/runs/7/artifacts" > "$d/artifacts" && mv "$d/artifacts" "$base/actions/runs/7/artifacts"
     done
-    if [ "$2" = kernel ] && [ -n "${named-$kernel_version}" ]; then
-        jq --arg n "bande-version-${named-$kernel_version}" '.artifacts += [{id: 99, name: $n}]' \
-            "$base/actions/runs/7/artifacts" > "$d/artifacts" && mv "$d/artifacts" "$base/actions/runs/7/artifacts"
-    fi
-    if [ "$2" = web ]; then
-        jq --arg n "bande-version-$web_version" '.artifacts += [{id: 99, name: $n}]' \
+    if [ "$2" = web ] && [ -n "${named-$web_version}" ]; then
+        jq --arg n "bande-version-${named-$web_version}" '.artifacts += [{id: 99, name: $n}]' \
             "$base/actions/runs/7/artifacts" > "$d/artifacts" && mv "$d/artifacts" "$base/actions/runs/7/artifacts"
     fi
     export GITHUB_API_URL
@@ -152,15 +139,10 @@ refuses "the apps may not publish packs for the desktop's programs" "translates 
 d=$(case_dir); l10n_debs "$d" bande-weather 0.1.0~deb14+l10n20261108; make_deb "$d/art/forky-all" bande-weather 0.1.0~deb14+l10n20261108 all; workflow=l10n.yml ref=l10n-20261108 api "$d" apps
 refuses "a language pack run of the apps may publish only packs" "apps-l10n does not publish" fetch apps-l10n "$d/out"
 
-d=$(case_dir); kernel_debs "$d"; api "$d" kernel
-check "a green kernel run feeds apple" sh -c "'$root/scripts/fetch-run.sh' kernel 7 '$d/out' | grep -qx component=apple"
-check "it brings the kernel" test -e "$d/out/forky/linux-image-${kernel_abi}_${kernel_version}_arm64.deb"
-d=$(case_dir); kernel_debs "$d"; event=workflow_dispatch api "$d" kernel
-check "a dispatched kernel run is taken" fetch kernel "$d/out"
-d=$(case_dir); kernel_debs "$d" "$kernel_version~deb14"; api "$d" kernel
-check "a kernel already carrying forky's suffix is taken" fetch kernel "$d/out"
 d=$(case_dir); web_debs "$d"; api "$d" web
 check "a green web run feeds main with the browser and its language packs" sh -c "'$root/scripts/fetch-run.sh' web 7 '$d/out' | grep -qx component=main && test -e '$d/out/forky/bande-browser_${web_version}${x}_arm64.deb' -a -e '$d/out/forky/bande-browser-l10n-sv-se_${web_version}${x}_all.deb'"
+d=$(case_dir); web_debs "$d"; event=workflow_dispatch api "$d" web
+check "a dispatched web run is taken" fetch web "$d/out"
 d=$(case_dir); desktop_debs "$d" 0.1.1$x; ref=v0.1.1 api "$d" desktop
 check "an annotated tag is followed to its commit" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=refs/tags/v0.1.0 api "$d" desktop
@@ -173,10 +155,11 @@ wait
 
 d=$(case_dir); desktop_debs "$d"; api "$d" desktop
 refuses "an unknown repository is refused" "unknown repository" fetch images "$d/out"
+refuses "the kernel is not a source of the archive" "unknown repository" fetch kernel "$d/out"
 d=$(case_dir); desktop_debs "$d"; workflow=ci.yml api "$d" desktop
 refuses "another workflow is refused" "not .github/workflows/release.yml" fetch desktop "$d/out"
-d=$(case_dir); make_deb "$d/art/arm64" bande-compositor "$kernel_version" arm64; api "$d" kernel
-refuses "the desktop's packages are refused from the kernel" "kernel does not publish" fetch kernel "$d/out"
+d=$(case_dir); for a in amd64 arm64; do make_deb "$d/art/forky-$a" bande-compositor "$web_version$x" $a; done; api "$d" web
+refuses "the desktop's packages are refused from web" "web does not publish" fetch web "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=main api "$d" desktop
 refuses "a desktop push to main is refused" "publishes vX.Y.Z tags" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=v0.1 api "$d" desktop
@@ -187,12 +170,12 @@ d=$(case_dir); desktop_debs "$d"; tagged=$other api "$d" desktop
 refuses "a tag on another commit is refused" "points at $other" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; event=workflow_dispatch api "$d" desktop
 refuses "a dispatched desktop run is refused" "started by workflow_dispatch" fetch desktop "$d/out"
-d=$(case_dir); kernel_debs "$d"; ref=feature api "$d" kernel
-refuses "a kernel branch run is refused" "the kernel publishes main" fetch kernel "$d/out"
-d=$(case_dir); kernel_debs "$d"; event=push api "$d" kernel
-refuses "a kernel push run is refused" "started by push" fetch kernel "$d/out"
-d=$(case_dir); kernel_debs "$d"; event=pull_request api "$d" kernel
-refuses "a pull request run is refused" "started by pull_request" fetch kernel "$d/out"
+d=$(case_dir); web_debs "$d"; ref=feature api "$d" web
+refuses "a web branch run is refused" "the web publishes main" fetch web "$d/out"
+d=$(case_dir); web_debs "$d"; event=push api "$d" web
+refuses "a web push run is refused" "started by push" fetch web "$d/out"
+d=$(case_dir); web_debs "$d"; event=pull_request api "$d" web
+refuses "a pull request run is refused" "started by pull_request" fetch web "$d/out"
 d=$(case_dir); desktop_debs "$d"; conclusion=failure api "$d" desktop
 refuses "a failed run is refused" "ended in failure" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; status=in_progress api "$d" desktop
@@ -204,12 +187,12 @@ d=$(case_dir); desktop_debs "$d" 0.1.1$x; api "$d" desktop
 refuses "packages of another version than the tag are refused" "carries version 0.1.1" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d" 0.1.0+git20261029.35.788731f; api "$d" desktop
 refuses "a main build's version under a tag is refused" "carries version" fetch desktop "$d/out"
-d=$(case_dir); kernel_debs "$d" 7.2.12-1; named=7.2.12-1 api "$d" kernel
-refuses "a kernel without the +bande suffix is refused" "not <debian-version>+bandeN" fetch kernel "$d/out"
-d=$(case_dir); kernel_debs "$d" 7.2.12-1+bande2; api "$d" kernel
-refuses "kernel packages of another version than named are refused" "the run publishes 7.2.12-1+bande1" fetch kernel "$d/out"
-d=$(case_dir); kernel_debs "$d"; named='' api "$d" kernel
-refuses "a kernel run without its version artifact is refused" "names 0 versions" fetch kernel "$d/out"
+d=$(case_dir); web_debs "$d" 153.6.0esr-1~deb14; named=153.6.0esr-1 api "$d" web
+refuses "a browser without the +bande suffix is refused" "not <debian-version>+bandeN" fetch web "$d/out"
+d=$(case_dir); web_debs "$d" 153.6.0esr-1+bande2~deb14; api "$d" web
+refuses "browser packages of another version than named are refused" "the run publishes $web_version~deb14" fetch web "$d/out"
+d=$(case_dir); web_debs "$d"; named='' api "$d" web
+refuses "a web run without its version artifact is refused" "names 0 versions" fetch web "$d/out"
 d=$(case_dir); desktop_debs "$d"; make_deb "$d/art/forky-arm64" libc6 9.9 arm64; api "$d" desktop
 refuses "a package outside the archive's names is refused" "desktop does not publish" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; rm -r "$d/art/forky-amd64"; api "$d" desktop
@@ -304,8 +287,6 @@ refuses "a suite missing one of its artifacts is refused" "no single bande-debs-
 d=$(case_dir); make_deb "$d/art/duke-all" bande-desktop-l10n-sv 0.1.0~deb15+l10n20261108 all; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
 check "duke's packs carry ~deb15 before the stamp" "$root/scripts/fetch-run.sh" l10n 7 "$d/out" "$two"
 check "and go to duke alone" sh -c "test -e '$d/out/duke/bande-desktop-l10n-sv_0.1.0~deb15+l10n20261108_all.deb' && test ! -e '$d/out/forky'"
-d=$(case_dir); kernel_debs "$d"; api "$d" kernel
-check "the kernel still feeds forky alone" sh -c "'$root/scripts/fetch-run.sh' kernel 7 '$d/out' '$two' && test -e '$d/out/forky/bande-os-apple_${kernel_version}_arm64.deb' && test ! -e '$d/out/duke'"
 
 merged=$(case_dir)/out
 d=$(case_dir); apps_debs "$d" weather 0.2.0$x; ref=weather-v0.2.0 api "$d" apps

@@ -3,7 +3,7 @@
 #                   [--processed SOURCE=ID,...] [--conf DIR] [--cache DIR]
 # Rebuilds the whole archive, every suite conf/suites lists, from the live,
 # signature-checked site plus the packages in each DIR/SUITE, which come from
-# the repository SOURCE and go to its COMPONENT (main or apple) of SUITE, signs
+# the repository SOURCE and go to its COMPONENT of SUITE, signs
 # it with the keys in conf/signing-keys (secret keys in $GNUPGHOME) and writes
 # the site to --out. A DIR may hold packages for some suites only.
 # - --add: one build, whose packages on each architecture carry one version; a
@@ -16,8 +16,9 @@
 #   while that package is at RELEASE in the archive, after this publish's other
 #   additions, so a pack built on an older release, or on one not published
 #   yet, is skipped; otherwise as --add-each.
-# Each package keeps its newest version only, and apple keeps the packages of
-# its newest two kernel versions only, in each suite. The suites share one pool.
+# Each package keeps its newest version only, in each suite. The suites share one
+# pool. A component the live site serves but conf/distribution.in no longer
+# lists is dropped, with its pool files and its names in state/owners.
 #
 # The site also keeps state/owners, the source each package comes from: a
 # package of another source's name is refused, unless conf/handovers moves it:
@@ -45,10 +46,6 @@ here=$(cd "$(dirname "$0")" && pwd)
 # The keyring and source packages are built by this repository (source apt) and
 # live in main.
 repository_packages=" bande-archive-keyring bande-apt-source "
-# Kernel packages carry the kernel version in their name, so each kernel stays
-# until it is dropped; keep_kernels bounds how many fit within the Pages limit.
-kernel_packages='linux-*-apple-*'
-keep_kernels=2
 by_hash_keep=3
 # Valid-Until, as Debian's archives set it: apt refuses an InRelease past it, so
 # an old one cannot be replayed. look.yml re-signs once fewer than 7 days remain.
@@ -166,6 +163,9 @@ for suite in $suites; do
     live_suites+=" $suite"
     gpgv --quiet --keyring "$work/keyring.gpg" --output "$dist/Release" "$dist/InRelease" 2>/dev/null ||
         fail "$suite/InRelease is not signed by the archive key"
+    for c in $(awk '/^Components:/ { $1 = ""; print; exit }' "$dist/Release"); do
+        [[ " $components " == *" $c "* ]] || echo "rebuild: $suite/$c is no longer a component; dropping it"
+    done
     for c in $components; do
         for arch in $architectures; do
             index=$c/binary-$arch/Packages.xz
@@ -313,25 +313,7 @@ while read -r c package arch; do
     awk -v v="$top" '$4 == v { print; exit }' <<< "$rows" >> "$work/chosen"
 done < "$work/groups"
 
-# shellcheck disable=SC2053 # kernel_packages is a glob pattern
-is_kernel() { [ "${1#*/}" = apple ] && [[ $2 == $kernel_packages ]]; }
-# Each suite's apple keeps its own newest kernels.
-declare -A kept
-for suite in $suites; do
-    kernels=$(while read -r c package _ version _; do
-        if [ "$c" = "$suite/apple" ] && is_kernel "$c" "$package"; then echo "$version"; fi
-    done < "$work/chosen" | sort -u)
-    kept[$suite]=''
-    for _ in $(seq "$keep_kernels"); do
-        top=$({ grep -vxF -f <(printf '%s\n' "${kept[$suite]}") <<< "$kernels" || true; } | newest)
-        [ -z "$top" ] || kept[$suite]+="$top"$'\n'
-    done
-done
-while read -r c package arch version path; do
-    if is_kernel "$c" "$package" && ! grep -qxF -- "$version" <<< "${kept[${c%/*}]}"; then
-        echo "rebuild: dropping $package $version ($arch) from $c, older than the newest $keep_kernels kernels"
-        continue
-    fi
+while read -r c _ _ _ path; do
     reprepro --silent -b "$work/repo" --export=silent-never -C "${c#*/}" includedeb "${c%/*}" "$path"
 done < "$work/chosen"
 reprepro --silent -b "$work/repo" export

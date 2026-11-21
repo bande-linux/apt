@@ -21,9 +21,8 @@ p code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
 <body>
 <main>
 <h1>Bande</h1>
-<p class="lead">APT repository for the Bande desktop on Debian, amd64 and arm64. One suite per
-Debian release, named by its codename; today <code>forky</code> (Debian 14): every tagged desktop
-release, and the Mac mini kernel as Debian forky updates it.</p>
+<p class="lead">APT repository for the Bande desktop on Debian 14 (forky), for amd64 and arm64.
+One suite per Debian release, named by its codename; today <code>forky</code>.</p>
 
 <h2>Install</h2>
 <p>On Debian 14 (forky). The packages are built against forky and do not install on Debian 13 (trixie).</p>
@@ -40,8 +39,6 @@ URIs: https://bande-linux.github.io/apt
 Suites: forky
 Components: main
 Signed-By: /usr/share/keyrings/bande-archive-keyring.pgp</code></pre>
-<p>On Apple Silicon it also adds <code>/etc/apt/sources.list.d/bande-apple.sources</code>, the
-same source with <code>Components: apple</code>.</p>
 <p>2. Install the desktop:</p>
 <pre><code>sudo apt update
 sudo apt install bande-desktop</code></pre>
@@ -49,18 +46,10 @@ sudo apt install bande-desktop</code></pre>
 the everyday apps. If another display manager is installed, apt asks which one to start. Updates
 arrive with <code>sudo apt upgrade</code>.</p>
 
-<h2>Components</h2>
-<p><code>main</code> (amd64, arm64) holds the desktop, the repository
-packages and the optional apps, each installed on its own with
-<code>sudo apt install bande-&lt;name&gt;</code>. <code>apple</code> (arm64) holds the Mac mini M2 kernel, built from Debian's kernel
-with the Apple patches, and <code>bande-os-apple</code>; it carries the newest two kernel
-versions. <code>bande-apt-source</code> enables it on Apple Silicon only. To enable it on
-another machine:</p>
-<pre><code>sudo cp /usr/share/bande-apt-source/bande-apple.sources /etc/apt/sources.list.d/
-sudo apt update</code></pre>
-<p>To turn it off (the Mac then gets no kernel updates):</p>
-<pre><code>sudo rm /etc/apt/sources.list.d/bande-apple.sources
-sudo apt update</code></pre>
+<h2>Packages</h2>
+<p>The one component, <code>main</code> (amd64, arm64), holds the desktop, the browser, the
+repository packages and the optional apps, each installed on its own with
+<code>sudo apt install bande-&lt;name&gt;</code>.</p>
 
 <h2>Remove</h2>
 <pre><code>sudo apt purge bande-apt-source bande-archive-keyring</code></pre>

@@ -11,11 +11,9 @@
 #   version is the tag; the live one is bande-desktop's in main;
 # - dict: the green dict.yml push of the desktop's highest dict-YYYYMMDD tag,
 #   whose version is the date; the live one is bande-dict-en's in main;
-# - kernel: the newest green follow-debian.yml schedule or dispatch run on main
-#   with a bande-version-VERSION artifact; the live one is bande-os-apple's in
-#   apple;
-# - web: the same for bande-linux/web, the browser; the live one is
-#   bande-browser's in main;
+# - web: the newest green follow-debian.yml schedule or dispatch run on main of
+#   bande-linux/web with a bande-version-VERSION artifact, the browser; the live
+#   one is bande-browser's in main;
 # - apps: per app, the green build.yml push of its highest <app>-vX.Y.Z tag,
 #   when X.Y.Z is newer than the live bande-<app>'s in main and the run is not
 #   in the live state/processed, which holds the runs already taken or refused.
@@ -31,7 +29,7 @@
 #   signature.
 # InRelease and state/processed are read past the Pages CDN (fetch-fresh.sh),
 # and the indexes by hash, so a publish in progress cannot mix generations.
-# fetch-run.sh checks each printed run in full. Needs GH_TOKEN; both
+# fetch-run.sh checks each printed run in full. Needs GH_TOKEN; the source
 # repositories are public.
 set -euo pipefail
 
@@ -220,7 +218,6 @@ follow_debian() {
         echo "find-runs: $repo $version (run $run) is published" >&2
     fi
 }
-follow_debian kernel apple bande-os-apple
 follow_debian web main bande-browser
 
 : > "$work/processed"

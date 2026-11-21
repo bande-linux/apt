@@ -1,6 +1,7 @@
 #!/bin/sh
 set -e
-apple=/etc/apt/sources.list.d/bande-apple.sources
-if [ "$1" = configure ] && [ -z "$2" ] && [ ! -e "$apple" ] && grep -qas 'apple,' /proc/device-tree/compatible; then
-    cp /usr/share/bande-apt-source/bande-apple.sources "$apple"
+# The archive no longer has an apple component; remove the source that earlier
+# versions added for it.
+if [ "$1" = configure ] && [ -n "$2" ]; then
+    rm -f /etc/apt/sources.list.d/bande-apple.sources
 fi

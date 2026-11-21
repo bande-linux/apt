@@ -3,6 +3,6 @@ Label: Bande
 Codename: @SUITE@
 Suite: @SUITE@
 Architectures: amd64 arm64
-Components: main apple
-Description: Bande for Debian @NUMBER@ (@SUITE@): the desktop (main) and the Mac mini kernel (apple), every green build
+Components: main
+Description: Bande for Debian @NUMBER@ (@SUITE@): the desktop and apps, every green build
 DebIndices: Packages Release . .gz .xz

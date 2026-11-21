@@ -12,7 +12,7 @@ Install instructions for users are on the site ([`site/index.html`](site/index.h
 One suite per Debian release, named by its codename. [`conf/suites`](conf/suites) lists them, one
 per line, and is the only list: the source repositories read it from `main` to build their
 matrix, and every publish rebuilds each suite it lists. Today it lists `forky` (Debian 14).
-Each suite has the same components, which share one pool:
+Each suite has one component, `main`, and the suites share one pool:
 
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
@@ -21,12 +21,8 @@ Each suite has the same components, which share one pool:
 | `main` | amd64, arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/web` that built the browser | `bande-browser`, `bande-browser-l10n-*` |
 | `main` | all | green `l10n.yml` runs of `l10n-YYYYMMDD[.N]` tag pushes of `bande-linux/desktop` and of `bande-linux/apps`, the tagged commit on `main`: translation-only builds | `bande-desktop-l10n-*`, `bande-<app>-l10n-*`, each at `<release>+l10nYYYYMMDD[.N]` |
 | `main` | all | green `dict.yml` runs of `dict-YYYYMMDD` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-dict-*`, Dictionary's packs |
-| `apple` | arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/kernel` that built a kernel | `linux-*-apple-*`, `bande-os-apple` |
 
-Each package keeps its newest version only, as in Debian's own suites. Kernel packages carry
-the kernel version in their name, so `apple` keeps the packages of the newest two kernel
-versions and drops older ones; kernel debs are large and the site must stay under the Pages
-limit.
+Each package keeps its newest version only, as in Debian's own suites.
 
 ### Suites and versions
 
@@ -39,7 +35,7 @@ backports carry `~bpoNN+N`:
 | desktop `vX.Y.Z`, app `<app>-vX.Y.Z` | `X.Y.Z~deb14` |
 | `l10n-YYYYMMDD[.N]` packs | `X.Y.Z~deb14+l10nYYYYMMDD[.N]`, X.Y.Z the release they translate |
 | dict `dict-YYYYMMDD` | `YYYYMMDD~deb14` |
-| web and kernel (`bande-version-BASE`) | `BASE~deb14`, BASE `<debian-version>+bandeN` |
+| web (`bande-version-BASE`) | `BASE~deb14`, BASE `<debian-version>+bandeN` |
 | `bande-apt-source` | `1.N~deb14`, one per suite |
 | `bande-archive-keyring` | `1.N`, the same file for every suite |
 
@@ -51,9 +47,7 @@ versions without the suffix.
 
 A source run uploads, for each suite it built, `bande-debs-<suite>-<arch>` artifacts (the
 architectures below). A run without any artifact of a listed suite, such as one built before
-the suite was added, leaves that suite as it is; it must carry at least one suite. The kernel
-does not build per suite yet: its runs upload `bande-debs-arm64`, unsuffixed (or `~deb14`), and
-feed `forky` alone.
+the suite was added, leaves that suite as it is; it must carry at least one suite.
 
 - **Adding a suite** (Debian 15 `duke`): add `duke` to `conf/suites` and push. The next publish
   starts `dists/duke` empty with the repository packages, and the next tags of the source
@@ -66,10 +60,9 @@ feed `forky` alone.
 ## The repository packages
 
 `bande-archive-keyring` (the keys of [`conf/archive-key.asc`](conf/archive-key.asc) and an APT
-pin that lets the archive provide only `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` and
-`linux-*-apple-*`) and, for each suite, `bande-apt-source` (`<suite> main`; its postinst adds
-`apple` in `bande-apple.sources` on Apple Silicon) are built by this repository,
-from [`packaging/`](packaging), with
+pin that lets the archive provide only `bande-*`, `xdg-desktop-portal-bande` and
+`libpam-bande-secrets`) and, for each suite, `bande-apt-source` (`<suite> main`) are built by
+this repository, from [`packaging/`](packaging), with
 [`scripts/build-repository-packages.sh`](scripts/build-repository-packages.sh). No source
 repository may publish them, so the archive depends on none of them.
 
@@ -105,10 +98,9 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
      `bande-desktop` in `main`;
    - dict: the green `dict.yml` push of the desktop's highest `dict-YYYYMMDD` tag, against the
      version of `bande-dict-en` in `main`;
-   - kernel: the newest green `follow-debian.yml` run on `main` that uploaded a
-     `bande-version-VERSION` artifact (runs that found nothing new upload none), against the
-     version of `bande-os-apple` in `apple`;
-   - web: the same for `bande-linux/web`, against the version of `bande-browser` in `main`;
+   - web: the newest green `follow-debian.yml` run on `main` of `bande-linux/web` that uploaded
+     a `bande-version-VERSION` artifact (runs that found nothing new upload none), against the
+     version of `bande-browser` in `main`;
    - apps: for each app, the green `build.yml` push of its highest `<app>-vX.Y.Z` tag, against
      the version of `bande-<app>` in `main`, unless the live `state/processed` lists the run:
      the publish records every apps run it took or refused there, so a refused tag is not
@@ -139,7 +131,7 @@ same releases.
      by hand it waits for the run to finish);
    - a desktop run must be the `push` of a `vX.Y.Z` tag that points at the run's commit; a
      desktop push to `main` is refused;
-   - a kernel or web run must be a `schedule` or `workflow_dispatch` run on `main`;
+   - a web run must be a `schedule` or `workflow_dispatch` run on `main`;
    - a dict run must be the desktop's `dict.yml` `push` of a `dict-YYYYMMDD` tag that points
      at the run's commit; it carries `bande-dict-*` alone, at `YYYYMMDD`, in `all`;
    - an apps run must be the `push` of an `<app>-vX.Y.Z` tag that points at the run's commit,
@@ -153,8 +145,7 @@ same releases.
 
    It then downloads, for each suite, the `bande-debs-<suite>-<arch>` artifacts into
    `<dir>/<suite>/`. The desktop uploads `amd64`, `arm64` and `all`, web `amd64`, `arm64` and
-   `all` (the language packs), apps `amd64` and `arm64`, dict and l10n `all`; the kernel
-   `bande-debs-arm64`. It refuses:
+   `all` (the language packs), apps `amd64` and `arm64`, dict and l10n `all`. It refuses:
    - package names outside the repository's list; for apps, exactly `bande-<app>` of the tag
      and its packs `bande-<app>-l10n-*` (architecture `all`, in each architecture's artifact),
      and never a name of the desktop's (its `packaging/`
@@ -163,7 +154,7 @@ same releases.
    - a package filed under another architecture's artifact;
    - versions other than the run's plus the suite's suffix (see [Suites and
      versions](#suites-and-versions)): the tag's `X.Y.Z~debNN` for the desktop and an app, so
-     test builds' `+git` versions are refused, and for the kernel and web the version its one
+     test builds' `+git` versions are refused, and for web the version its one
      `bande-version-VERSION` artifact names, of the form `<debian-version>+bandeN`;
    - an incomplete architecture: one that lacks a package another architecture carries in that
      suite.
@@ -175,11 +166,13 @@ same releases.
    reprepro in a fresh database; [`conf/distribution.in`](conf/distribution.in) is each suite's
    stanza:
    - its input is the live site, whose `InRelease` signatures, `Packages` and pool checksums are
-     all verified, plus the new packages, from `DIR/<suite>/`: `--add SOURCE:COMPONENT=DIR` for
-     a desktop or kernel build, `--add web:main=DIR` for the browser, `--add-each apps:main=DIR`
+     all verified, plus the new packages, from `DIR/<suite>/`: `--add desktop:main=DIR` for
+     a desktop build, `--add web:main=DIR` for the browser, `--add-each apps:main=DIR`
      for apps;
-   - a suite, component or architecture that the live site does not serve yet starts empty;
-   - for a desktop or kernel build, the new packages of a suite on each architecture (with the
+   - a suite, component or architecture that the live site does not serve yet starts empty; a
+     component the live site serves but `conf/distribution.in` no longer lists is dropped, with
+     its pool files and its names in `state/owners`;
+   - for a desktop or browser build, the new packages of a suite on each architecture (with the
      architecture-independent ones) must carry one version, and
      it refuses a version older than the live one and changed contents under a published
      version;
@@ -235,7 +228,7 @@ own. For up to ten minutes after a publish it can serve a new `InRelease` beside
   script percent-encodes a random set of the path's letters (never the `/apt` site root, which
   Pages routes before decoding) and refuses an answer with an `Age` above 0.
 
-- **Access:** `github.token` with `actions: read` and `contents: read`; `desktop`, `kernel` and
+- **Access:** `github.token` with `actions: read` and `contents: read`; `desktop`, `web` and
   `apps` are public, so no other token or GitHub App is involved.
 - **Signing:** the signing subkey is a secret of the `apt-publish` environment, which only `main`
   can use.
@@ -289,7 +282,7 @@ tests/run-all.sh
 ```
 
 The tests build throwaway keys and packages for amd64 and arm64, serve sites and a fake GitHub
-API over local HTTP, and check finding new releases, every source repository, publishing to both components, the
-kernel limit, tampering and forged signatures, and a stale `Packages.xz` beside a new
+API over local HTTP, and check finding new releases, every source repository, dropping a
+component, tampering and forged signatures, and a stale `Packages.xz` beside a new
 `InRelease`, which both the scripts and apt resolve by hash. They also check rotation, and that apt itself
 updates from and downloads out of the result, without touching the machine's own apt state.

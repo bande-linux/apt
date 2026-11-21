@@ -36,11 +36,7 @@ desktop() {
     make_deb "$scratch/in-$1/forky" bande-compositor "$2" arm64
     make_deb "$scratch/in-$1/forky" bande-desktop "$2" all
 }
-kernel() {
-    make_deb "$scratch/in-$1/forky" "linux-image-$2-apple-arm64-16k" "$3" arm64
-    make_deb "$scratch/in-$1/forky" linux-image-apple-arm64-16k "$3" arm64
-    make_deb "$scratch/in-$1/forky" bande-os-apple "$3" arm64
-}
+browser() { local a; for a in amd64 arm64; do make_deb "$scratch/in-$1/forky" bande-browser "$2" $a; done; }
 d1=0.0.0+git20261029.1.aaaaaaa
 
 empty=$(mktemp -d -p "$scratch")
@@ -50,11 +46,9 @@ REPOSITORY_VERSION=1.0 "$root/scripts/build-repository-packages.sh" "$scratch/in
 refuses "a site with key.asc but no InRelease is refused" "refusing to start the archive over" \
     rebuild --live "$(serve "$half")" --add-each apt:main="$scratch/in-apt" --out "$scratch/x"
 
-kernel k0 7.2.12 7.2.12-1+bande1
-check "a first publish can be the kernel alone" rebuild --live "$(serve "$empty")" --add kernel:apple="$scratch/in-k0" \
-    --add-each apt:main="$scratch/in-apt" --out "$scratch/site-k0"
-check "it carries the kernel" has "$scratch/site-k0" apple arm64 bande-os-apple=7.2.12-1+bande1
-check "and the repository packages for both architectures" both "$scratch/site-k0" main bande-archive-keyring=1.0
+check "a first publish can be the repository packages alone" rebuild --live "$(serve "$empty")" \
+    --add-each apt:main="$scratch/in-apt" --out "$scratch/site-a0"
+check "it carries them for both architectures" both "$scratch/site-a0" main bande-archive-keyring=1.0
 
 desktop 1 "$d1"
 check "a first desktop publish" rebuild --live "$(serve "$empty")" --add desktop:main="$scratch/in-1" \
@@ -62,23 +56,15 @@ check "a first desktop publish" rebuild --live "$(serve "$empty")" --add desktop
 check "main carries the build on amd64 and arm64" both "$scratch/site-1" main "bande-compositor=$d1"
 check "main carries the architecture-independent packages on both" both "$scratch/site-1" main "bande-desktop=$d1"
 check "main carries the repository packages" both "$scratch/site-1" main bande-apt-source=1.0~deb14
-check "apple starts empty" sh -c "[ -z \"\$(grep '^Package:' '$scratch/site-1/dists/forky/apple/binary-arm64/Packages')\" ]"
-check "Release lists both components and architectures" sh -c \
-    "grep -q '^Components: main apple' '$scratch/site-1/dists/forky/Release' && grep -q '^Architectures: amd64 arm64' '$scratch/site-1/dists/forky/Release'"
+check "Release lists main and both architectures" sh -c \
+    "grep -qx 'Components: main' '$scratch/site-1/dists/forky/Release' && grep -qx 'Architectures: amd64 arm64' '$scratch/site-1/dists/forky/Release'"
 check "index carries the fingerprint" grep -q "$(gpg --with-colons --show-keys "$conf/archive-key.asc" | awk -F: '/^fpr/ { print $10; exit }')" "$scratch/site-1/index.html"
 check "key.asc is published" cmp "$conf/archive-key.asc" "$scratch/site-1/key.asc"
 check "Release sets Acquire-By-Hash" grep -qx 'Acquire-By-Hash: yes' "$scratch/site-1/dists/forky/Release"
 check "every index is served by hash" cmp "$scratch/site-1/dists/forky/main/binary-arm64/Packages.xz" \
     "$(by_hash "$scratch/site-1" main/binary-arm64/Packages.xz)"
 
-kernel k1 7.2.12 7.2.12-1+bande1
-check "kernel publish" rebuild --live "$(serve "$scratch/site-1")" --add kernel:apple="$scratch/in-k1" --out "$scratch/site-k1"
-check "apple carries the kernel on arm64" has "$scratch/site-k1" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
-check "apple carries bande-os-apple" has "$scratch/site-k1" apple arm64 bande-os-apple=7.2.12-1+bande1
-check "apple stays empty on amd64" sh -c "[ -z \"\$(grep '^Package:' '$scratch/site-k1/dists/forky/apple/binary-amd64/Packages')\" ]"
-check "a kernel publish keeps main" diff <(listed "$scratch/site-1" main arm64) <(listed "$scratch/site-k1" main arm64)
-
-site=$scratch/site-k1
+site=$scratch/site-1
 for n in 2 3 4; do
     desktop $n "0.0.0+git20261030.$n.bbbbbb$n"
     check "desktop publish $n" rebuild --live "$(serve "$site")" --add desktop:main="$scratch/in-$n" --out "$scratch/site-$n"
@@ -88,7 +74,6 @@ check "main carries the newest build" both "$site" main bande-compositor=0.0.0+g
 check "main dropped the previous build" lacks "$site" main amd64 bande-compositor=0.0.0+git20261030.3.bbbbbb3
 check "dropped files leave the pool" test ! -e "$site/pool/main/b/bande-compositor/bande-compositor_${d1}_arm64.deb"
 check "repository packages survive rebuilds" has "$site" main arm64 bande-archive-keyring=1.0
-check "desktop publishes keep the kernel" has "$site" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
 check "the previous generations' indexes stay by hash" sh -c "cmp '$scratch/site-3/dists/forky/main/binary-amd64/Packages.xz' \
     '$(by_hash "$scratch/site-3" main/binary-amd64/Packages.xz | sed "s|site-3|site-4|")' &&
     test -e '$(by_hash "$scratch/site-2" main/binary-amd64/Packages | sed "s|site-2|site-4|")'"
@@ -97,28 +82,12 @@ check "a publish over a stale index still reads the live one by hash" \
     rebuild --live "$(serve "$(stale "$site" "$scratch/site-3")")" --add desktop:main="$scratch/in-4" --out "$scratch/stale"
 check "and keeps the newest build" both "$scratch/stale" main bande-compositor=0.0.0+git20261030.4.bbbbbb4
 
-kernel k2 7.2.14 7.2.14-1+bande1
-check "a second kernel" rebuild --live "$(serve "$site")" --add kernel:apple="$scratch/in-k2" --out "$scratch/site-k2"
-check "two kernels are both kept" has "$scratch/site-k2" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
-check "the second kernel is in" has "$scratch/site-k2" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+bande1
-kernel k3 7.3.1 7.3.1-1+bande2
-check "a third kernel" rebuild --live "$(serve "$scratch/site-k2")" --add kernel:apple="$scratch/in-k3" --out "$scratch/site-k3"
-site=$scratch/site-k3
-check "the newest kernel is in" has "$site" apple arm64 linux-image-7.3.1-apple-arm64-16k=7.3.1-1+bande2
-check "the one before it stays" has "$site" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+bande1
-check "the oldest kernel is dropped" lacks "$site" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
-check "its file leaves the pool" sh -c "! find '$site/pool' -name 'linux-image-7.2.12-*' | grep -q ."
-check "the kernel metapackage follows the newest kernel" has "$site" apple arm64 linux-image-apple-arm64-16k=7.3.1-1+bande2
-check "bande-os-apple follows the newest kernel" has "$site" apple arm64 bande-os-apple=7.3.1-1+bande2
-check "main is untouched by kernels" diff <(listed "$scratch/site-4" main amd64) <(listed "$site" main amd64)
 
 live=$(serve "$site")
 check "republishing the same build changes nothing" rebuild --live "$live" --add desktop:main="$scratch/in-4" --out "$scratch/same"
 check "same build gives the same packages" diff <(listed "$site" main arm64) <(listed "$scratch/same" main arm64)
 refuses "an older build is refused" "is older than" \
     rebuild --live "$live" --add desktop:main="$scratch/in-2" --out "$scratch/older"
-refuses "an older kernel is refused" "is older than" \
-    rebuild --live "$live" --add kernel:apple="$scratch/in-k2" --out "$scratch/older-kernel"
 make_deb "$scratch/in-changed/forky" bande-compositor 0.0.0+git20261030.4.bbbbbb4 arm64 changed
 refuses "a changed package under a published version is refused" "different contents" \
     rebuild --live "$live" --add desktop:main="$scratch/in-changed" --out "$scratch/changed"
@@ -136,7 +105,7 @@ make_deb "$scratch/in-mixed/forky" bande-apt-source 1.1 all
 refuses "a source may not publish the repository packages" "bande-apt-source is built by apt itself, not desktop" \
     rebuild --live "$live" --add desktop:main="$scratch/in-mixed" --out "$scratch/mixed"
 make_deb "$scratch/in-misplaced/forky" bande-archive-keyring 1.1 all
-refuses "repository packages stay in main" "belongs in main" \
+refuses "a component the archive lacks is refused" "the archive has no component apple" \
     rebuild --live "$live" --add-each apt:apple="$scratch/in-misplaced" --out "$scratch/misplaced"
 REPOSITORY_VERSION=1.0 SOURCE_DATE_EPOCH=86400 "$root/scripts/build-repository-packages.sh" "$scratch/in-apt-rebuilt" > /dev/null
 check "rebuilt repository packages of the same version are skipped" rebuild --live "$live" \
@@ -149,10 +118,10 @@ check "the keyring is 1.1" both "$scratch/apt-new" main bande-archive-keyring=1.
 check "the source package is 1.1" both "$scratch/apt-new" main bande-apt-source=1.1~deb14
 
 desktop 5 0.0.0+git20261031.5.eeeeeee
-kernel k4 7.3.2 7.3.2-1+bande1
-check "one publish takes a desktop and a kernel" rebuild --live "$live" --add desktop:main="$scratch/in-5" --add kernel:apple="$scratch/in-k4" --out "$scratch/both"
+browser w5 153.6.0esr-1+bande1
+check "one publish takes a desktop and a browser" rebuild --live "$live" --add desktop:main="$scratch/in-5" --add web:main="$scratch/in-w5" --out "$scratch/both"
 check "main takes the desktop" both "$scratch/both" main bande-compositor=0.0.0+git20261031.5.eeeeeee
-check "apple takes the kernel" has "$scratch/both" apple arm64 linux-image-7.3.2-apple-arm64-16k=7.3.2-1+bande1
+check "and the browser" both "$scratch/both" main bande-browser=153.6.0esr-1+bande1
 check "the oldest generation's indexes leave by hash" test ! -e "$(by_hash "$scratch/site-1" main/binary-amd64/Packages.xz | sed "s|site-1|both|")"
 # apt-ftparchive keeps the newest by-hash files by mtime. The live Release's Date
 # has whole seconds, so two quick publishes tie on it; the exact times in
@@ -172,9 +141,8 @@ check "a publish over it" rebuild --live "$(serve "$early")" --add desktop:main=
 check "the by-hash files keep the exact times state/by-hash lists" awk -v p="$live_xz" '
     FNR == 1 { n++ } $2 == p { t[n] = $1 } END { exit !(t[1] != "" && t[1] - t[2] < 0.001 && t[2] - t[1] < 0.001) }' \
     "$early/state/by-hash" "$scratch/early-out/state/by-hash"
-check "the kernel limit holds across both" lacks "$scratch/both" apple arm64 linux-image-7.2.14-apple-arm64-16k=7.2.14-1+bande1
-refuses "every batch is checked" "built by apt itself, not kernel" \
-    rebuild --live "$live" --add desktop:main="$scratch/in-5" --add kernel:apple="$scratch/in-misplaced" --out "$scratch/both-bad"
+refuses "every batch is checked" "built by apt itself, not web" \
+    rebuild --live "$live" --add desktop:main="$scratch/in-5" --add web:main="$scratch/in-misplaced" --out "$scratch/both-bad"
 
 a1=0.1.0+git20261101.3.aaaaaaa a2=0.2.0+git20261101.4.bbbbbbb
 for arch in amd64 arm64; do
@@ -185,7 +153,7 @@ check "an apps publish" rebuild --live "$live" --add-each apps:main="$scratch/in
 check "main takes an app at its own version" both "$scratch/apps" main "bande-weather=$a1"
 check "and the other at its own" both "$scratch/apps" main "bande-clock=$a2"
 check "the desktop stays beside the apps" both "$scratch/apps" main bande-compositor=0.0.0+git20261030.4.bbbbbb4
-check "owners name each source" sh -c "grep -qx 'bande-weather apps' '$scratch/apps/state/owners' && grep -qx 'bande-compositor desktop' '$scratch/apps/state/owners' && grep -qx 'bande-os-apple kernel' '$scratch/apps/state/owners'"
+check "owners name each source" sh -c "grep -qx 'bande-weather apps' '$scratch/apps/state/owners' && grep -qx 'bande-compositor desktop' '$scratch/apps/state/owners'"
 check "the processed runs are kept" sh -c "grep -qx 'apps 501' '$scratch/apps/state/processed' && grep -qx 'apps 502' '$scratch/apps/state/processed'"
 apps_live=$(serve "$scratch/apps")
 for arch in amd64 arm64; do make_deb "$scratch/in-apps-again/forky" bande-weather "$a1" $arch rebuilt; done
@@ -223,27 +191,43 @@ make_deb "$scratch/in-arm64/forky" bande-compositor "$d1" arm64
 make_deb "$scratch/in-arm64/forky" bande-desktop "$d1" all
 partial_conf=$scratch/partial-conf
 cp -r "$conf" "$partial_conf"
-sed -i 's/^Architectures: .*/Architectures: arm64/; s/^Components: .*/Components: main/' "$partial_conf/distribution.in"
+sed -i 's/^Architectures: .*/Architectures: arm64/' "$partial_conf/distribution.in"
 (export GNUPGHOME=$conf/gnupg
  "$root/scripts/rebuild.sh" --conf "$partial_conf" --live "$(serve "$empty")" \
     --add desktop:main="$scratch/in-arm64" --out "$scratch/partial") > /dev/null
-check "a live Release without amd64 and apple is taken" sh -c \
-    "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/partial")' --add kernel:apple='$scratch/in-k1' --out '$scratch/grown' > '$scratch/grown.log'"
-check "it says what starts empty" grep -q "does not list apple/binary-amd64/Packages.xz yet" "$scratch/grown.log"
+check "a live Release without amd64 is taken" sh -c \
+    "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/partial")' --add-each apt:main='$scratch/in-apt' --out '$scratch/grown' > '$scratch/grown.log'"
+check "it says what starts empty" grep -q "does not list main/binary-amd64/Packages.xz yet" "$scratch/grown.log"
 check "the arm64 packages carry over" has "$scratch/grown" main arm64 "bande-compositor=$d1"
 check "the new architecture starts empty" lacks "$scratch/grown" main amd64 "bande-compositor=$d1"
-check "the new component takes the kernel" has "$scratch/grown" apple arm64 linux-image-7.2.12-apple-arm64-16k=7.2.12-1+bande1
+check "and takes the new packages" both "$scratch/grown" main bande-archive-keyring=1.0
+
+# A component conf/distribution.in no longer lists leaves the site: the live
+# site has main and apple, the archive main alone.
+old_conf=$scratch/old-conf
+cp -r "$conf" "$old_conf"
+sed -i 's/^Components: .*/Components: main apple/' "$old_conf/distribution.in"
+make_deb "$scratch/in-old-apple/forky" linux-image-7.2.12-apple-arm64-16k 7.2.12-1+bande1 arm64
+make_deb "$scratch/in-old-apple/forky" bande-os-apple 7.2.12-1+bande1 arm64
+(export GNUPGHOME=$conf/gnupg
+ "$root/scripts/rebuild.sh" --conf "$old_conf" --live "$(serve "$site")" \
+    --add kernel:apple="$scratch/in-old-apple" --out "$scratch/with-apple") > /dev/null
+check "the old site serves apple" has "$scratch/with-apple" apple arm64 bande-os-apple=7.2.12-1+bande1
+check "a publish over it" sh -c \
+    "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/with-apple")' --add-each apt:main='$scratch/in-apt' --out '$scratch/no-apple' > '$scratch/no-apple.log'"
+check "says it drops apple" grep -q "forky/apple is no longer a component; dropping it" "$scratch/no-apple.log"
+check "Release lists main alone" grep -qx 'Components: main' "$scratch/no-apple/dists/forky/Release"
+check "apple's indexes are gone" test ! -e "$scratch/no-apple/dists/forky/apple"
+check "and its pool files" sh -c "! find '$scratch/no-apple/pool' -name '*apple*' | grep -q ."
+check "and its names in state/owners" sh -c "! grep -q apple '$scratch/no-apple/state/owners'"
+check "and in state/by-hash" sh -c "! grep -q '^[^ ]* forky/apple/' '$scratch/no-apple/state/by-hash'"
+check "main carries over" diff <(listed "$site" main arm64) <(listed "$scratch/no-apple" main arm64)
 
 tampered=$(mktemp -d -p "$scratch")
 cp -r "$site/." "$tampered/"
 echo x >> "$tampered/pool/main/b/bande-desktop/bande-desktop_0.0.0+git20261030.4.bbbbbb4_all.deb"
 refuses "a tampered pool file is refused" "does not match its signed index" \
     "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$tampered")" --add desktop:main="$scratch/in-4" --out "$scratch/t1"
-cp -r "$site/." "$tampered/"
-kernel_deb=$(find "$tampered/pool/apple" -type f -name 'linux-image-7.3.1-*.deb')
-echo x >> "$kernel_deb"
-refuses "a tampered kernel is refused" "does not match its signed index" \
-    "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$tampered")" --add desktop:main="$scratch/in-4" --out "$scratch/t1b"
 forged=$scratch/forged
 (make_conf "$forged" && "$root/scripts/rebuild.sh" --conf "$forged" --live "$(serve "$empty")" \
     --add desktop:main="$scratch/in-1" --out "$scratch/forged-site") > /dev/null
@@ -300,17 +284,12 @@ cat > "$lists/sources.d/bande.sources" <<EOF
 Types: deb
 URIs: $(serve "$(stale "$site" "$scratch/site-3")")
 Suites: forky
-Components: main apple
+Components: main
 Signed-By: $lists/keyring.gpg
 EOF
 apt_env=(env APT_CONFIG="$lists/apt.conf")
 check "apt accepts the signed archive" "${apt_env[@]}" apt-get update -o APT::Update::Error-Mode=any
 check "apt sees the newest desktop build" sh -c "APT_CONFIG='$lists/apt.conf' apt-cache policy bande-compositor | grep -q 'Candidate: 0.0.0+git20261030.4.bbbbbb4'"
-if [ "$host_arch" = arm64 ]; then
-    check "apt on arm64 sees the newest kernel" sh -c "APT_CONFIG='$lists/apt.conf' apt-cache policy bande-os-apple | grep -q 'Candidate: 7.3.1-1+bande2'"
-else
-    check "apt on $host_arch sees no kernel" sh -c "! APT_CONFIG='$lists/apt.conf' apt-cache policy bande-os-apple | grep -q Candidate"
-fi
 check "apt downloads from it" "${apt_env[@]}" apt-get install -y -q --download-only bande-compositor
 check "apt downloads the keyring from it" "${apt_env[@]}" apt-get install -y -q --download-only bande-archive-keyring bande-apt-source
 check "the download is the newest build" test -e "$lists/archives/bande-compositor_0.0.0+git20261030.4.bbbbbb4_${host_arch}.deb"
@@ -364,7 +343,6 @@ check "it gets its own Release, signed" gpgv --keyring "$conf/keyring.gpg" "$scr
 check "named after it" sh -c "grep -qx 'Codename: duke' '$scratch/two/dists/duke/Release' && grep -qx 'Suite: duke' '$scratch/two/dists/duke/Release' && grep -q '^Description: Bande for Debian 15 (duke)' '$scratch/two/dists/duke/Release'"
 check "forky keeps its unsuffixed packages" diff <(listed "$site" main arm64 | tr ' ' '\n' | grep -v '^bande-a') \
     <(listed "$scratch/two" main arm64 | tr ' ' '\n' | grep -v '^bande-a')
-check "and its kernels" diff <(listed "$site" apple arm64) <(listed "$scratch/two" apple arm64)
 check "a run with forky packages alone leaves duke without them" lacks "$scratch/two" main arm64 bande-desktop=0.0.0+git20261030.4.bbbbbb4 duke
 check "each suite has its own source package" bash -c "$(declare -f listed has both); both '$scratch/two' main bande-apt-source=1.1~deb14 && both '$scratch/two' main bande-apt-source=1.1~deb15 duke"
 check "and the one keyring" bash -c "$(declare -f listed has both); both '$scratch/two' main bande-archive-keyring=1.1 && both '$scratch/two' main bande-archive-keyring=1.1 duke"

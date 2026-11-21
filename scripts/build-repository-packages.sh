@@ -4,8 +4,7 @@
 # Builds, from packaging/ into OUT_DIR/SUITE for each suite in conf/suites,
 # bande-archive-keyring (the keys in conf/archive-key.asc and an APT pin that
 # lets the archive provide only Bande's packages), the same for every suite,
-# and bande-apt-source (the SUITE main source, and the apple source its
-# postinst enables on Apple Silicon). Their version is VERSION = 1.<commits
+# and bande-apt-source (the SUITE main source). Their version is VERSION = 1.<commits
 # that touched packaging/, the keys, conf/suites or this script>, so it rises
 # with every change, and the same commit builds the same packages; the source
 # package carries VERSION~debNN, as every package built for a suite.
@@ -83,9 +82,7 @@ for suite in $suites; do
     mkdir -p "$out/$suite"
     cp "$work/keyring"/*.deb "$out/$suite/"
     rm -rf "$work/bande-apt-source"
-    mkdir -p "$work/bande-apt-source/etc/apt/sources.list.d" "$work/bande-apt-source/usr/share/bande-apt-source"
+    mkdir -p "$work/bande-apt-source/etc/apt/sources.list.d"
     substitute "$root/packaging/bande.sources.in" "$suite" > "$work/bande-apt-source/etc/apt/sources.list.d/bande.sources"
-    substitute "$root/packaging/bande-apple.sources.in" "$suite" \
-        > "$work/bande-apt-source/usr/share/bande-apt-source/bande-apple.sources"
     package bande-apt-source "$out/$suite" "$suite"
 done

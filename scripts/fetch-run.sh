@@ -1,6 +1,6 @@
 #!/bin/bash
 # Usage: fetch-run.sh REPO RUN_ID OUT_DIR [CONF_DIR]
-# Verifies a CI run of bande-linux/REPO (desktop, dict, l10n, kernel, web, apps or
+# Verifies a CI run of bande-linux/REPO (desktop, dict, l10n, web, apps or
 # apps-l10n): the repository's release workflow, finished green, its commit on main.
 # Every package built for a suite carries the suite's ~debNN (suites.sh) right
 # after its release version, written ~debNN below:
@@ -12,8 +12,8 @@
 #   the run's commit; it carries bande-desktop-l10n-* packs alone, each at
 #   RELEASE~debNN+l10nYYYYMMDD[.N], where vRELEASE is a desktop tag on the run's
 #   commit's history.
-# - kernel and web: a schedule or dispatch on main, naming its base version
-#   with one bande-version-VERSION artifact; its packages carry VERSION~debNN.
+# - web: a schedule or dispatch on main, naming its base version with one
+#   bande-version-VERSION artifact; its packages carry VERSION~debNN.
 # - apps: the push of an <app>-vX.Y.Z tag that points at the run's commit, for
 #   an apps/<app> at that commit; it carries bande-<app> alone, at X.Y.Z~debNN,
 #   never a name of the desktop's, and its packs bande-<app>-l10n-*,
@@ -43,17 +43,13 @@ wait_limit=${FETCH_RUN_WAIT:-900}
 poll=${FETCH_RUN_POLL:-15}
 # Built by apt itself; no source repository may publish them.
 repository_packages=" bande-archive-keyring bande-apt-source "
-# Names the desktop, the kernel and the web repository publish, which an app may never take; the
+# Names the desktop and the web repository publish, which an app may never take; the
 # desktop's packaging/ directories are added from its main branch.
-reserved=" xdg-desktop-portal-bande libpam-bande-secrets bande-desktop bande-os-apple bande-browser "
+reserved=" xdg-desktop-portal-bande libpam-bande-secrets bande-desktop bande-browser "
 fail() { echo "fetch-run: $*" >&2; exit 1; }
 # shellcheck source=scripts/suites.sh
 . "$here/suites.sh"
 suites=$(suite_list "$conf") || fail "conf/suites is not usable"
-# Temporary, until the kernel repository builds per suite: its runs upload the
-# unsuffixed bande-debs-ARCH artifacts, whose packages carry the base version
-# (or base~deb14), and feed forky alone.
-kernel_suite=forky
 
 # Per repository: its workflow, the events it publishes from, the package names
 # it may publish, the component they go to, the architectures it must build
@@ -87,13 +83,6 @@ case $source_repo in
         component=main
         architectures=(all)
         ;;
-    kernel)
-        workflow=.github/workflows/follow-debian.yml
-        events=(schedule workflow_dispatch)
-        names=('linux-*-apple-*' bande-os-apple)
-        component=apple
-        architectures=(arm64)
-        ;;
     web)
         workflow=.github/workflows/follow-debian.yml
         events=(schedule workflow_dispatch)
@@ -107,7 +96,7 @@ case $source_repo in
         component=main
         architectures=(amd64 arm64)
         ;;
-    *) fail "unknown repository $source_repo; the archive takes desktop, dict, l10n, kernel, web, apps and apps-l10n" ;;
+    *) fail "unknown repository $source_repo; the archive takes desktop, dict, l10n, web, apps and apps-l10n" ;;
 esac
 case $source_repo in
     dict | l10n) repo=bande-linux/desktop ;;
@@ -128,7 +117,7 @@ read -r event path ref sha owner < <(jq -r '[.event, .path, .head_branch, .head_
 [ "$path" = "$workflow" ] || fail "run $run is from $path, not $workflow"
 [ "$owner" = "$repo" ] || fail "run $run built $owner, not $repo"
 [[ " ${events[*]} " == *" $event "* ]] || fail "run $run was started by $event; $source_repo publishes from ${events[*]}"
-if [ "$source_repo" != kernel ] && [ "$source_repo" != web ]; then
+if [ "$source_repo" != web ]; then
     tag=${ref#refs/tags/}
     if [ "$source_repo" = l10n ] || [ "$source_repo" = apps-l10n ]; then
         [[ $tag =~ ^l10n-([0-9]{8}(\.[0-9]+)?)$ ]] || fail "run $run built $ref; the language packs publish l10n-YYYYMMDD tags"
@@ -173,7 +162,7 @@ case $status in
 esac
 
 call "$api/repos/$repo/actions/runs/$run/artifacts?per_page=100" > "$work/artifacts.json"
-if [ "$source_repo" = kernel ] || [ "$source_repo" = web ]; then
+if [ "$source_repo" = web ]; then
     mapfile -t named < <(jq -r '.artifacts[].name | select(startswith("bande-version-")) | ltrimstr("bande-version-")' \
         "$work/artifacts.json")
     [ ${#named[@]} -eq 1 ] || fail "run $run names ${#named[@]} versions; it must upload one bande-version-VERSION artifact"
@@ -247,8 +236,6 @@ fetch_suite() {
             fi
             if [ -n "${stamp:-}" ]; then
                 l10n_version "$package" "$version" "$number"
-            elif [ "$source_repo" = kernel ] && [ "$version" = "$want_version" ]; then
-                : # Temporary: the kernel builds without the suffix yet.
             elif [ "$version" != "$want_version~deb$number" ]; then
                 fail "$package carries version $version, the run publishes $want_version~deb$number for $suite"
             fi
@@ -276,16 +263,11 @@ mkdir -p "$out" "$work/stage"
 shopt -s nullglob
 fetched=''
 for suite in $suites; do
-    if [ "$source_repo" = kernel ]; then
-        [ "$suite" = "$kernel_suite" ] || continue
-        prefix=bande-debs-
-    else
-        prefix=bande-debs-$suite-
-        # A run built before the suite was listed leaves it as it is.
-        if ! jq -e --arg p "$prefix" 'any(.artifacts[]; .name | startswith($p))' "$work/artifacts.json" > /dev/null; then
-            echo "fetch-run: run $run built nothing for $suite; it stays as it is" >&2
-            continue
-        fi
+    prefix=bande-debs-$suite-
+    # A run built before the suite was listed leaves it as it is.
+    if ! jq -e --arg p "$prefix" 'any(.artifacts[]; .name | startswith($p))' "$work/artifacts.json" > /dev/null; then
+        echo "fetch-run: run $run built nothing for $suite; it stays as it is" >&2
+        continue
     fi
     fetch_suite "$suite"
     fetched+=" $suite"
