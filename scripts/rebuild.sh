@@ -1,12 +1,13 @@
 #!/bin/bash
 # Usage: rebuild.sh --live URL --add|--add-each|--add-l10n SOURCE:COMPONENT=DIR [...] --out DIR
-#                   [--processed SOURCE=ID,...] [--apps-dirs "DIR ..."] [--conf DIR] [--cache DIR]
+#                   [--processed SOURCE=ID,...] [--conf DIR] [--cache DIR]
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/suites.sh
 . "$here/suites.sh"
 repository_packages=" bande-archive-keyring bande-apt-source "
+sources=" apt desktop dict web "
 by_hash_keep=3
 valid_days=14
 
@@ -21,7 +22,6 @@ while [ $# -gt 0 ]; do
         --add-each) batches+=("each $2"); shift 2 ;;
         --add-l10n) batches+=("l10n $2"); shift 2 ;;
         --processed) processed+=("$2"); shift 2 ;;
-        --apps-dirs) apps_dirs=$2; shift 2 ;;
         --out) out=$2; shift 2 ;;
         --conf) conf=$2; shift 2 ;;
         --cache) cache=$2; shift 2 ;;
@@ -51,11 +51,11 @@ components=$(field "${suites%%$'\n'*}" Components)
 architectures=$(field "${suites%%$'\n'*}" Architectures)
 for batch in "${batches[@]}"; do
     [[ ${batch#* } =~ ^[a-z]+:[a-z]+=. ]] || fail "${batch#* } is not SOURCE:COMPONENT=DIR"
+    source=${batch#* } source=${source%%:*}
+    [[ $sources == *" $source "* ]] || fail "the archive takes no source $source"
     component=${batch#*:} component=${component%%=*}
     [[ " $components " == *" $component "* ]] || fail "the archive has no component $component"
 done
-dirs_pattern='^[a-z0-9][a-z0-9 -]*$'
-[[ ${apps_dirs-x} =~ $dirs_pattern ]] || fail "--apps-dirs \"${apps_dirs-}\" lists no apps/ directory"
 for entry in "${processed[@]}"; do
     [[ $entry =~ ^[a-z0-9-]+=[0-9]+(,[0-9]+)*$ ]] || fail "--processed $entry is not SOURCE=ID,..."
 done
@@ -164,7 +164,8 @@ newest() {
 
 shopt -s nullglob
 : > "$work/new"
-cp "$work/owners" "$work/claims"
+awk -v s="$sources" 'index(s, " " $2 " ")' "$work/owners" > "$work/claims"
+awk -v s="$sources" '!index(s, " " $2 " ") { print $1 }' "$work/owners" > "$work/gone"
 for batch in "${batches[@]}"; do
     mode=${batch%% *} batch=${batch#* }
     source=${batch%%:*} component=${batch#*:} component=${component%%=*} debs=${batch#*=}
@@ -248,17 +249,13 @@ while read -r mode c package arch version deb; do
     [ "$mode" != l10n ] || add "$mode" "$c" "$package" "$arch" "$version" "$deb"
 done < "$work/new"
 
-if [ -n "${apps_dirs+set}" ]; then
-    awk -v dirs="$apps_dirs" 'BEGIN { n = split(dirs, d, " "); for (i = 1; i <= n; i++) built["bande-" d[i]] = 1 }
-        FILENAME == ARGV[1] { if ($2 == "apps") apps[$1] = 1; next }
-        { name = $2; sub(/-l10n-.*/, "", name) }
-        ($2 in apps) && !(name in built) { print $1, $2 > "/dev/stderr"; next } { print }' \
-        "$work/claims" "$work/rows" 2> "$work/dropped" > "$work/kept"
-    mv "$work/kept" "$work/rows"
-    sort -u "$work/dropped" | while read -r c package; do
-        echo "rebuild: the apps no longer build $package; dropping it from $c"
-    done
-fi
+awk 'FILENAME == ARGV[1] { claimed[$1] = 1; next } FILENAME == ARGV[2] { if (!($1 in claimed)) gone[$1] = 1; next }
+    { name = $2 } (name in gone) { print $1, $2 > "/dev/stderr"; next } { print }' \
+    "$work/claims" "$work/gone" "$work/rows" 2> "$work/dropped" > "$work/kept"
+mv "$work/kept" "$work/rows"
+sort -u "$work/dropped" | while read -r c package; do
+    echo "rebuild: no source the archive takes publishes $package any more; dropping it from $c"
+done
 
 mkdir -p "$work/repo/conf"
 for suite in $suites; do stanza "$suite"; echo; done > "$work/repo/conf/distributions"

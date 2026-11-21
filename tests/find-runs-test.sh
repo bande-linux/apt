@@ -6,23 +6,21 @@ conf=$scratch/conf
 make_conf "$conf"
 export GH_TOKEN=test
 
-# A live archive serving desktop 0.1.0, browser 153.6.0esr-1+bande1,
-# bande-weather 0.1.0 and repository packages 1.0, which has refused apps run 60.
+# A live archive serving desktop 0.1.0, browser 153.6.0esr-1+bande1 and
+# repository packages 1.0.
 for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop/forky" $p 0.1.0 all; done
 for a in amd64 arm64; do make_deb "$scratch/web/forky" bande-browser 153.6.0esr-1+bande1 $a; done
-for a in amd64 arm64; do make_deb "$scratch/apps/forky" bande-weather 0.1.0 $a; done
 REPOSITORY_VERSION=1.0 "$root/scripts/build-repository-packages.sh" "$scratch/apt" > /dev/null
 empty=$(mktemp -d -p "$scratch")
 "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$empty")" \
-    --add desktop:main="$scratch/desktop" --add web:main="$scratch/web" --processed apps=60 \
-    --add-each apt:main="$scratch/apt" --add-each apps:main="$scratch/apps" \
+    --add desktop:main="$scratch/desktop" --add web:main="$scratch/web" \
+    --add-each apt:main="$scratch/apt" \
     --out "$scratch/site" > /dev/null
 live=$(serve "$scratch/site")
 
 # api DIR: the GitHub API of the source repositories. $desktop_runs lists the
 # desktop's release runs as ID:TAG:CONCLUSION, newest first; $web_runs web's
-# runs with a version artifact as ID:VERSION:CONCLUSION[:EVENT];
-# $apps_runs the apps' build runs as ID:CONCLUSION:EVENT:TAG.
+# runs with a version artifact as ID:VERSION:CONCLUSION[:EVENT].
 api() {
     local d=$1 run id tag version conclusion event base=$1/repos/bande-linux
     mkdir -p "$base/desktop/actions/workflows/release.yml" "$base/web/actions/runs" "$base/web/actions/artifacts"
@@ -51,31 +49,20 @@ api() {
             '.workflow_runs += [{id: $i, event: "push", head_branch: $t, conclusion: $c}]' \
             "$base/desktop/actions/workflows/dict.yml/runs" > "$d/x" && mv "$d/x" "$base/desktop/actions/workflows/dict.yml/runs"
     done
-    mkdir -p "$base/apps/actions/workflows/build.yml"
-    echo '{"workflow_runs": []}' > "$base/apps/actions/workflows/build.yml/runs"
-    for run in ${apps_runs:-}; do
-        IFS=: read -r id conclusion event tag <<< "$run"
-        jq --argjson i "$id" --arg c "$conclusion" --arg e "$event" --arg t "$tag" \
-            '.workflow_runs += [{id: $i, event: $e, head_branch: $t, conclusion: $c}]' \
-            "$base/apps/actions/workflows/build.yml/runs" > "$d/x" && mv "$d/x" "$base/apps/actions/workflows/build.yml/runs"
+    local l10n=$base/desktop/actions/workflows/l10n.yml/runs status
+    mkdir -p "$(dirname "$l10n")" "$base/desktop/git/matching-refs/tags" "$base/desktop/compare"
+    echo '{"workflow_runs": []}' > "$l10n"
+    for run in ${l10n_runs:-}; do
+        IFS=: read -r id tag conclusion <<< "$run"
+        jq --argjson i "$id" --arg t "$tag" --arg c "$conclusion" \
+            '.workflow_runs += [{id: $i, event: "push", head_branch: $t, head_sha: "cafe", conclusion: $c}]' \
+            "$l10n" > "$d/x" && mv "$d/x" "$l10n"
     done
-    local repo runs tags tag
-    for repo in desktop apps; do
-        runs=${l10n_runs:-} tags=${desktop_tags:-}
-        [ "$repo" = desktop ] || runs=${apps_l10n_runs:-} tags=${apps_tags:-}
-        mkdir -p "$base/$repo/actions/workflows/l10n.yml" "$base/$repo/git/matching-refs/tags" "$base/$repo/compare"
-        echo '{"workflow_runs": []}' > "$base/$repo/actions/workflows/l10n.yml/runs"
-        for run in $runs; do
-            IFS=: read -r id tag conclusion <<< "$run"
-            jq --argjson i "$id" --arg t "$tag" --arg c "$conclusion" \
-                '.workflow_runs += [{id: $i, event: "push", head_branch: $t, head_sha: "cafe", conclusion: $c}]' \
-                "$base/$repo/actions/workflows/l10n.yml/runs" > "$d/x" && mv "$d/x" "$base/$repo/actions/workflows/l10n.yml/runs"
-        done
-        tr ' ' '\n' <<< "$tags l10n-20261101" | grep . | jq -R '{ref: ("refs/tags/" + .)}' | jq -s . > "$base/$repo/git/matching-refs/tags/index.html"
-        for tag in $tags; do
-            if [[ " ${on_history:-} " == *" $tag "* ]]; then status=ahead; else status=behind; fi
-            jq -n --arg s "$status" '{status: $s}' > "$base/$repo/compare/$tag...cafe"
-        done
+    tr ' ' '\n' <<< "${desktop_tags:-} l10n-20261101" | grep . | jq -R '{ref: ("refs/tags/" + .)}' | jq -s . \
+        > "$base/desktop/git/matching-refs/tags/index.html"
+    for tag in ${desktop_tags:-}; do
+        if [[ " ${on_history:-} " == *" $tag "* ]]; then status=ahead; else status=behind; fi
+        jq -n --arg s "$status" '{status: $s}' > "$base/desktop/compare/$tag...cafe"
     done
     export GITHUB_API_URL
     GITHUB_API_URL=$(serve "$d")
@@ -138,48 +125,11 @@ check "both are printed" diff <(printf 'desktop 31\nl10n 90\n') "$d/out"
 d=$(mktemp -d -p "$scratch"); l10n_runs="90:l10n-20261108:success" desktop_tags="v0.1.0 v0.2.0" on_history="v0.1.0" api "$d"
 check "a newer release after the packs' commit does not hold them" find_runs "$d/out"
 check "they are printed" diff <(echo "l10n 90") "$d/out"
-"$root/scripts/rebuild.sh" --conf "$conf" --live "$live" --processed l10n=90,77 --processed apps-l10n=95 --out "$scratch/site-l10n" > /dev/null
-d=$(mktemp -d -p "$scratch"); l10n_runs="90:l10n-20261108:success" apps_l10n_runs="95:l10n-20261108:success" desktop_tags="v0.1.0" \
+"$root/scripts/rebuild.sh" --conf "$conf" --live "$live" --processed l10n=90,77 --out "$scratch/site-l10n" > /dev/null
+d=$(mktemp -d -p "$scratch"); l10n_runs="90:l10n-20261108:success" desktop_tags="v0.1.0" \
     on_history="v0.1.0" api "$d"
 check "taken language pack runs are not taken again" find_runs "$d/out" "$(serve "$scratch/site-l10n")"
 check "nothing is printed for them" test ! -s "$d/out"
-d=$(mktemp -d -p "$scratch"); apps_l10n_runs="95:l10n-20261108:success" apps_tags="weather-v0.1.0 clock-v0.1.0" \
-    on_history="weather-v0.1.0" api "$d"
-check "the apps' language pack tag is found" find_runs "$d/out"
-check "and printed" diff <(echo "apps-l10n 95") "$d/out"
-d=$(mktemp -d -p "$scratch"); apps_l10n_runs="95:l10n-20261108:success" apps_tags="weather-v0.1.0 weather-v0.2.0 radio-v0.1.0" \
-    on_history="weather-v0.1.0 weather-v0.2.0 radio-v0.1.0" api "$d"
-check "app packs built on releases not published yet wait" find_runs "$d/out"
-check "nothing is printed for those" test ! -s "$d/out"
-check "it names the releases" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'wait for radio-v0.1.0, weather-v0.2.0 to be published'"
-d=$(mktemp -d -p "$scratch"); apps_runs="61:success:push:weather-v0.2.0" apps_l10n_runs="95:l10n-20261108:success" \
-    apps_tags="weather-v0.1.0 weather-v0.2.0" on_history="weather-v0.1.0 weather-v0.2.0" api "$d"
-check "they go with the app's release" find_runs "$d/out"
-check "both are printed" diff <(printf 'apps 61\napps-l10n 95\n') "$d/out"
-
-d=$(mktemp -d -p "$scratch"); apps_runs="61:success:push:weather-v0.2.0 59:success:push:weather-v0.1.0" api "$d"
-check "a new app tag is found" find_runs "$d/out"
-check "only that apps run is printed" diff <(echo "apps 61") "$d/out"
-d=$(mktemp -d -p "$scratch"); apps_runs="59:success:push:weather-v0.1.0" api "$d"
-check "a published app tag is not found again" find_runs "$d/out"
-check "nothing is printed for it" test ! -s "$d/out"
-check "it says it is published" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'bande-weather 0.1.0 (run 59) is published'"
-d=$(mktemp -d -p "$scratch")
-apps_runs="63:success:push:weather-v0.2.0 62:success:push:weather-v0.10.0 64:success:push:clock-face-v0.1.0" api "$d"
-check "the highest tag of each app is found" find_runs "$d/out"
-check "one run per app, sorted by app" diff <(printf 'apps 64\napps 62\n') "$d/out"
-d=$(mktemp -d -p "$scratch"); apps_runs="60:success:push:weather-v0.4.0 65:success:push:weather-v0.3.0" api "$d"
-check "a refused apps run is not taken again" find_runs "$d/out"
-check "nor is an older tag taken in its place" test ! -s "$d/out"
-check "it says it was refused" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'run 60) was refused before'"
-d=$(mktemp -d -p "$scratch")
-apps_runs="66:failure:push:clock-v0.1.0 67:success:workflow_dispatch:clock-v0.1.0 68:success:push:main 69:success:push:ci-test 70:success:push:clock-v0.1 71:success:schedule:clock-v0.2.0" api "$d"
-check "red, dispatched, branch, malformed and scheduled apps runs are ignored" find_runs "$d/out"
-check "none of them is printed" test ! -s "$d/out"
-d=$(mktemp -d -p "$scratch"); apps_runs="72:success:push:weather-v0.1.0" api "$d"
-check "an empty site takes every app" find_runs "$d/out" "$(serve "$empty")"
-check "the app is printed for it" diff <(echo "apps 72") "$d/out"
-
 d=$(mktemp -d -p "$scratch"); mkdir -p "$d/repos/bande-linux/web/actions/runs" "$d/repos/bande-linux/web/actions/artifacts"
 jq -n '{artifacts: [{name: "bande-version-153.7.0esr-1+bande1", expired: false, workflow_run: {id: 41}}]}' \
     > "$d/repos/bande-linux/web/actions/artifacts/index.html"

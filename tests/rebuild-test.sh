@@ -138,43 +138,12 @@ check "the by-hash files keep the exact times state/by-hash lists" awk -v p="$li
 refuses "every batch is checked" "built by apt itself, not web" \
     rebuild --live "$live" --add desktop:main="$scratch/in-5" --add web:main="$scratch/in-misplaced" --out "$scratch/both-bad"
 
-a1=0.1.0+git20261101.3.aaaaaaa a2=0.2.0+git20261101.4.bbbbbbb
-for arch in amd64 arm64; do
-    make_deb "$scratch/in-apps/forky" bande-weather "$a1" $arch
-    make_deb "$scratch/in-apps/forky" bande-clock "$a2" $arch
-done
-check "an apps publish" rebuild --live "$live" --add-each apps:main="$scratch/in-apps" --processed apps=501,502 --out "$scratch/apps"
-check "main takes an app at its own version" both "$scratch/apps" main "bande-weather=$a1"
-check "and the other at its own" both "$scratch/apps" main "bande-clock=$a2"
-check "the desktop stays beside the apps" both "$scratch/apps" main bande-compositor=0.0.0+git20261030.4.bbbbbb4
-check "owners name each source" sh -c "grep -qx 'bande-weather apps' '$scratch/apps/state/owners' && grep -qx 'bande-compositor desktop' '$scratch/apps/state/owners'"
-check "the processed runs are kept" sh -c "grep -qx 'apps 501' '$scratch/apps/state/processed' && grep -qx 'apps 502' '$scratch/apps/state/processed'"
-apps_live=$(serve "$scratch/apps")
-for arch in amd64 arm64; do make_deb "$scratch/in-apps-again/forky" bande-weather "$a1" $arch rebuilt; done
-check "a same-version republish of an app is skipped" rebuild --live "$apps_live" --add-each apps:main="$scratch/in-apps-again" --processed apps=503 --out "$scratch/apps-again"
-check "the published app is kept" diff <(find "$scratch/apps/pool" -name 'bande-weather_*' -exec sha256sum {} + | awk '{ print $1 }' | sort) \
-    <(find "$scratch/apps-again/pool" -name 'bande-weather_*' -exec sha256sum {} + | awk '{ print $1 }' | sort)
-check "processed runs carry over and grow" sh -c "grep -qx 'apps 501' '$scratch/apps-again/state/processed' && grep -qx 'apps 503' '$scratch/apps-again/state/processed'"
-for arch in amd64 arm64; do make_deb "$scratch/in-apps-old/forky" bande-weather 0.1.0+git20261031.2.9999999 $arch; done
-check "an older app is skipped" rebuild --live "$apps_live" --add-each apps:main="$scratch/in-apps-old" --out "$scratch/apps-old"
-check "the newer app stays" both "$scratch/apps-old" main "bande-weather=$a1"
-check "a publish without apps keeps the processed runs" sh -c "'$root/scripts/rebuild.sh' --conf '$conf' --live '$apps_live' --add desktop:main='$scratch/in-4' --out '$scratch/apps-desktop' > /dev/null && grep -qx 'apps 502' '$scratch/apps-desktop/state/processed'"
-d6=0.0.0+git20261101.6.fffffff
-make_deb "$scratch/in-recommending/forky" bande-compositor "$d6" amd64
-make_deb "$scratch/in-recommending/forky" bande-compositor "$d6" arm64
-recommends=bande-weather make_deb "$scratch/in-recommending/forky" bande-desktop "$d6" all
-check "a desktop that recommends an app is taken" rebuild --live "$apps_live" --add desktop:main="$scratch/in-recommending" --out "$scratch/recommending"
-check "the desktop recommends the app" sh -c "grep -A8 '^Package: bande-desktop' '$scratch/recommending/dists/forky/main/binary-arm64/Packages' | grep -qx 'Recommends: bande-weather'"
-check "the app it recommends keeps its own version" both "$scratch/recommending" main "bande-weather=$a1"
-check "and stays the apps repository's" grep -qx 'bande-weather apps' "$scratch/recommending/state/owners"
-for arch in amd64 arm64; do make_deb "$scratch/in-apps-taken/forky" bande-compositor 9.0.0+git20261101.9.ccccccc $arch; done
-refuses "an app may not take a desktop package" "bande-compositor is published from desktop, not apps" \
-    rebuild --live "$apps_live" --add-each apps:main="$scratch/in-apps-taken" --out "$scratch/apps-taken"
-make_deb "$scratch/in-desktop-taken/forky" bande-weather 0.3.0 all
-refuses "the desktop may not take an app" "bande-weather is published from apps, not desktop" \
-    rebuild --live "$apps_live" --add desktop:main="$scratch/in-desktop-taken" --out "$scratch/desktop-taken"
-refuses "two sources may not claim one name in one publish" "is published from desktop, not apps" \
-    rebuild --live "$live" --add desktop:main="$scratch/in-desktop-taken" --add-each apps:main="$scratch/in-apps" --out "$scratch/both-claim"
+make_deb "$scratch/in-desktop-claims/forky" bande-weather 0.3.0 all
+for arch in amd64 arm64; do make_deb "$scratch/in-web-claims/forky" bande-weather 0.3.0 $arch; done
+refuses "two sources may not claim one name in one publish" "is published from desktop, not web" \
+    rebuild --live "$live" --add desktop:main="$scratch/in-desktop-claims" --add web:main="$scratch/in-web-claims" --out "$scratch/both-claim"
+refuses "a source the archive does not take is refused" "the archive takes no source apps" \
+    rebuild --live "$live" --add-each apps:main="$scratch/in-web-claims" --out "$scratch/unknown-source"
 
 make_deb "$scratch/in-arm64/forky" bande-compositor "$d1" arm64
 make_deb "$scratch/in-arm64/forky" bande-desktop "$d1" all
@@ -280,23 +249,19 @@ check "the download is the newest build" test -e "$lists/archives/bande-composit
 packs() { local p; for p in sv en-gb; do enhances=$2 make_deb "$1/forky" "$2-l10n-$p" "$3" all; done; }
 make_deb "$scratch/in-l0/forky" bande-desktop 0.1.0 all
 packs "$scratch/in-l0" bande-desktop 0.1.0
-for a in amd64 arm64; do make_deb "$scratch/in-w0/forky" bande-weather 0.1.0 $a; done
-packs "$scratch/in-w0" bande-weather 0.1.0
 check "a release with its packs" rebuild --live "$(serve "$empty")" --add desktop:main="$scratch/in-l0" \
-    --add-each apps:main="$scratch/in-w0" --add-each apt:main="$scratch/in-apt" --out "$scratch/l0"
+    --add-each apt:main="$scratch/in-apt" --out "$scratch/l0"
 packs "$scratch/in-l1" bande-desktop 0.1.0+l10n20261108
-packs "$scratch/in-w1" bande-weather 0.1.0+l10n20261108
 check "packs of the published release" rebuild --live "$(serve "$scratch/l0")" --add-l10n desktop:main="$scratch/in-l1" \
-    --add-l10n apps:main="$scratch/in-w1" --processed l10n=90 --out "$scratch/l1"
+    --processed l10n=90 --out "$scratch/l1"
 check "replace the release's packs" both "$scratch/l1" main bande-desktop-l10n-en-gb=0.1.0+l10n20261108
-check "an app's packs too" has "$scratch/l1" main arm64 bande-weather-l10n-sv=0.1.0+l10n20261108
 check "and the run is recorded" grep -qx 'l10n 90' "$scratch/l1/state/processed"
 packs "$scratch/in-l2" bande-desktop 0.0.9+l10n20261109
-packs "$scratch/in-w2" bande-weather 0.2.0+l10n20261109
-rebuild --live "$(serve "$scratch/l1")" --add-l10n desktop:main="$scratch/in-l2" --add-l10n apps:main="$scratch/in-w2" \
-    --out "$scratch/l2" > "$scratch/l2.log" 2>&1 || true
-check "are both left out" diff <(listed "$scratch/l1" main arm64) <(listed "$scratch/l2" main arm64)
-check "saying why" grep -q 'skipping bande-weather-l10n-sv 0.2.0+l10n20261109, built for bande-weather 0.2.0; forky/main has 0.1.0' "$scratch/l2.log"
+rebuild --live "$(serve "$scratch/l1")" --add-l10n desktop:main="$scratch/in-l2" --processed l10n=91 \
+    --out "$scratch/l2" > "$scratch/l2.log" 2>&1
+check "packs built on an older release are left out" diff <(listed "$scratch/l1" main arm64) <(listed "$scratch/l2" main arm64)
+check "saying why" grep -q 'skipping bande-desktop-l10n-sv 0.0.9+l10n20261109, built for bande-desktop 0.0.9; forky/main has 0.1.0' "$scratch/l2.log"
+check "the processed runs carry over and grow" sh -c "grep -qx 'l10n 90' '$scratch/l2/state/processed' && grep -qx 'l10n 91' '$scratch/l2/state/processed'"
 make_deb "$scratch/in-l3/forky" bande-desktop 0.2.0 all
 packs "$scratch/in-l3" bande-desktop 0.2.0
 packs "$scratch/in-l4" bande-desktop 0.2.0+l10n20261110
@@ -317,17 +282,18 @@ for a in amd64 arm64; do
     make_deb "$scratch/in-r0/forky" bande-clock 0.1.0~deb14 $a
 done
 packs "$scratch/in-r0" bande-viewer 0.1.0~deb14
-check "two apps" rebuild --live "$(serve "$empty")" --add-each apps:main="$scratch/in-r0" \
-    --add-each apt:main="$scratch/in-apt" --out "$scratch/r0"
-check "a publish with one of their directories left" sh -c "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/r0")' \
-    --add-each apt:main='$scratch/in-apt' --apps-dirs 'clock weather' --out '$scratch/r1' > '$scratch/r1.log'"
-check "keeps that app" both "$scratch/r1" main bande-clock=0.1.0~deb14
-check "drops the other with its packs" sh -c "! grep -q '^Package: bande-viewer' '$scratch/r1/dists/forky/main/binary-amd64/Packages' &&
+rebuild --live "$(serve "$empty")" --add web:main="$scratch/in-r0" --add-each apt:main="$scratch/in-apt" --out "$scratch/r0" > /dev/null
+sed -i 's/^\(bande-viewer[^ ]*\|bande-clock\) web$/\1 apps/' "$scratch/r0/state/owners"
+for a in amd64 arm64; do make_deb "$scratch/in-r1/forky" bande-clock 0.2.0~deb14 $a; done
+make_deb "$scratch/in-r1/forky" bande-desktop 0.2.0~deb14 all
+check "a publish over packages of a source the archive no longer takes" sh -c "'$root/scripts/rebuild.sh' --conf '$conf' \
+    --live '$(serve "$scratch/r0")' --add desktop:main='$scratch/in-r1' --out '$scratch/r1' > '$scratch/r1.log'"
+check "lets the desktop take one of their names" both "$scratch/r1" main bande-clock=0.2.0~deb14
+check "which it then owns" grep -qx 'bande-clock desktop' "$scratch/r1/state/owners"
+check "drops the others with their packs" sh -c "! grep -q '^Package: bande-viewer' '$scratch/r1/dists/forky/main/binary-amd64/Packages' &&
     ! find '$scratch/r1/pool' -name 'bande-viewer*' | grep -q . && ! grep -q '^bande-viewer' '$scratch/r1/state/owners'"
-check "saying so" grep -q 'the apps no longer build bande-viewer-l10n-sv; dropping it from forky/main' "$scratch/r1.log"
+check "saying so" grep -q 'no source the archive takes publishes bande-viewer-l10n-sv any more; dropping it from forky/main' "$scratch/r1.log"
 check "and keeps the other sources' packages" both "$scratch/r1" main bande-archive-keyring=1.0
-refuses "an empty list is refused" "lists no apps/ directory" rebuild --live "$(serve "$scratch/r0")" \
-    --add-each apt:main="$scratch/in-apt" --apps-dirs '' --out "$scratch/r2"
 
 # Two suites: duke is added beside the live forky, which serves packages
 # without a ~debNN suffix.

@@ -65,7 +65,7 @@ jobs:
               continue
             fi
             source=$repo
-            case $source in dict | l10n) source=desktop ;; apps-l10n) source=apps ;; esac
+            case $source in dict | l10n) source=desktop ;; esac
             ref=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/bande-linux/$source/actions/runs/$id" | jq -r '.head_branch // "?"') || ref='?'
             echo "- $repo $ref (run $id)" >> "$GITHUB_STEP_SUMMARY"
           done < runs
@@ -116,42 +116,22 @@ jobs:
           set -o pipefail
           printf -- '--add-each\napt:main=debs-apt\n' > adds
           : > refused
-          apps=()
           while read -r repo run; do
             [ "$repo" != apt ] && [ "$repo" != resign ] || continue
-            if [ "$repo" = l10n ] || [ "$repo" = apps-l10n ]; then
-              owner=desktop
-              [ "$repo" = l10n ] || owner=apps
-              if env -u GITHUB_OUTPUT scripts/fetch-run.sh "$repo" "$run" "debs-$repo" < /dev/null; then
-                printf -- '--add-l10n\n%s:main=debs-%s\n' "$owner" "$repo" >> adds
+            if [ "$repo" = l10n ]; then
+              if env -u GITHUB_OUTPUT scripts/fetch-run.sh l10n "$run" debs-l10n < /dev/null; then
+                printf -- '--add-l10n\ndesktop:main=debs-l10n\n' >> adds
               else
-                echo "::error::$repo run $run is refused; it is marked as taken and left out"
-                echo "$repo $run" >> refused
+                echo "::error::l10n run $run is refused; it is marked as taken and left out"
+                echo "l10n $run" >> refused
               fi
-              printf -- '--processed\n%s=%s\n' "$repo" "$run" >> adds
-              continue
-            fi
-            if [ "$repo" = apps ]; then
-              apps+=("$run")
-              if ! env -u GITHUB_OUTPUT scripts/fetch-run.sh apps "$run" debs-apps < /dev/null; then
-                echo "::error::apps run $run is refused; it is marked as taken and left out"
-                echo "apps $run" >> refused
-              fi
+              printf -- '--processed\nl10n=%s\n' "$run" >> adds
               continue
             fi
             component=$(env -u GITHUB_OUTPUT scripts/fetch-run.sh "$repo" "$run" "debs-$repo" < /dev/null |
               sed -n 's/^component=//p')
             printf -- '--add\n%s:%s=debs-%s\n' "$repo" "$component" "$repo" >> adds
           done < <(tr , '\n' <<< "$RUNS")
-          if compgen -G 'debs-apps/*.deb' > /dev/null; then
-            printf -- '--add-each\napps:main=debs-apps\n' >> adds
-          fi
-          if [ ${#apps[@]} -gt 0 ]; then
-            printf -- '--processed\napps=%s\n' "$(IFS=,; echo "${apps[*]}")" >> adds
-          fi
-          dirs=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" 'https://api.github.com/repos/bande-linux/apps/contents/apps?ref=main' |
-            jq -r '.[] | select(.type == "dir") | .name' | paste -sd ' ')
-          printf -- '--apps-dirs\n%s\n' "$dirs" >> adds
           echo "refused=$(paste -sd, refused)" >> "$GITHUB_OUTPUT"
 
       - name: Restore the pool cache (actions/cache v6)

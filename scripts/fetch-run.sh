@@ -1,6 +1,6 @@
 #!/bin/bash
 # Usage: fetch-run.sh REPO RUN_ID OUT_DIR [CONF_DIR]
-#        REPO: desktop, dict, l10n, web, apps or apps-l10n. Needs GH_TOKEN; waits up to
+#        REPO: desktop, dict, l10n or web. Needs GH_TOKEN; waits up to
 #        $FETCH_RUN_WAIT seconds (default 900) for a run still going.
 set -euo pipefail
 
@@ -10,7 +10,6 @@ api=${GITHUB_API_URL:-https://api.github.com}
 wait_limit=${FETCH_RUN_WAIT:-900}
 poll=${FETCH_RUN_POLL:-15}
 repository_packages=" bande-archive-keyring bande-apt-source "
-reserved=" xdg-desktop-portal-bande libpam-bande-secrets bande-desktop bande-browser "
 fail() { echo "fetch-run: $*" >&2; exit 1; }
 # shellcheck source=scripts/suites.sh
 . "$here/suites.sh"
@@ -38,13 +37,6 @@ case $source_repo in
         component=main
         architectures=(all)
         ;;
-    apps-l10n)
-        workflow=.github/workflows/l10n.yml
-        events=(push)
-        names=('bande-*-l10n-*')
-        component=main
-        architectures=(all)
-        ;;
     web)
         workflow=.github/workflows/follow-debian.yml
         events=(schedule workflow_dispatch)
@@ -52,17 +44,10 @@ case $source_repo in
         component=main
         architectures=(amd64 arm64 all)
         ;;
-    apps)
-        workflow=.github/workflows/build.yml
-        events=(push)
-        component=main
-        architectures=(amd64 arm64)
-        ;;
-    *) fail "unknown repository $source_repo; the archive takes desktop, dict, l10n, web, apps and apps-l10n" ;;
+    *) fail "unknown repository $source_repo; the archive takes desktop, dict, l10n and web" ;;
 esac
 case $source_repo in
     dict | l10n) repo=bande-linux/desktop ;;
-    apps-l10n) repo=bande-linux/apps ;;
     *) repo=bande-linux/$source_repo ;;
 esac
 
@@ -81,20 +66,15 @@ read -r event path ref sha owner < <(jq -r '[.event, .path, .head_branch, .head_
 [[ " ${events[*]} " == *" $event "* ]] || fail "run $run was started by $event; $source_repo publishes from ${events[*]}"
 if [ "$source_repo" != web ]; then
     tag=${ref#refs/tags/}
-    if [ "$source_repo" = l10n ] || [ "$source_repo" = apps-l10n ]; then
+    if [ "$source_repo" = l10n ]; then
         [[ $tag =~ ^l10n-([0-9]{8}(\.[0-9]+)?)$ ]] || fail "run $run built $ref; the language packs publish l10n-YYYYMMDD tags"
         stamp=${BASH_REMATCH[1]}
     elif [ "$source_repo" = desktop ]; then
         [[ $tag =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || fail "run $run built $ref; the desktop publishes vX.Y.Z tags"
         want_version=${BASH_REMATCH[1]}
-    elif [ "$source_repo" = dict ]; then
+    else
         [[ $tag =~ ^dict-([0-9]{8})$ ]] || fail "run $run built $ref; the dictionary packs publish dict-YYYYMMDD tags"
         want_version=${BASH_REMATCH[1]}
-    else
-        [[ $tag =~ ^([a-z0-9][a-z0-9-]*)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]] ||
-            fail "run $run built $ref; the apps publish <app>-vX.Y.Z tags"
-        app=${BASH_REMATCH[1]} want_version=${BASH_REMATCH[2]}
-        names=("bande-$app" "bande-$app-l10n-*")
     fi
     call "$api/repos/$repo/git/ref/tags/$tag" > "$work/tag.json" || fail "tag $tag does not exist"
     read -r type object < <(jq -r '[.object.type, .object.sha] | @tsv' "$work/tag.json")
@@ -131,30 +111,11 @@ if [ "$source_repo" = web ]; then
     [[ ${named[0]} =~ ^[0-9][A-Za-z0-9.~-]*\+bande[0-9]+$ ]] || fail "run $run names version ${named[0]}, not <debian-version>+bandeN"
     want_version=${named[0]}
 fi
-if [ "$source_repo" = apps ] || [ "$source_repo" = apps-l10n ]; then
-    call "$api/repos/$repo/contents/apps?ref=$sha" > "$work/apps.json" || fail "cannot list apps/ at $sha"
-    if [ "$source_repo" = apps ]; then
-        jq -e --arg a "$app" 'any(.[]; .type == "dir" and .name == $a)' "$work/apps.json" > /dev/null ||
-            fail "tag $tag names $app, but the run's commit has no apps/$app"
-    fi
-    call "$api/repos/bande-linux/desktop/contents/packaging?ref=main" > "$work/packaging.json" ||
-        fail "cannot list the desktop's packaging/"
-    reserved+="$(jq -r '.[] | select(.type == "dir") | .name' "$work/packaging.json" | tr '\n' ' ')"
-fi
 l10n_version() {
-    local package=$1 version=$2 number=$3 app release tag_name status
+    local package=$1 version=$2 number=$3 tag_name status
     [[ $version =~ ^([0-9]+\.[0-9]+\.[0-9]+)~deb$number\+l10n([0-9.]+)$ ]] && [ "${BASH_REMATCH[2]}" = "$stamp" ] ||
         fail "$package carries version $version, not RELEASE~deb$number+l10n$stamp"
-    release=${BASH_REMATCH[1]}
-    if [ "$source_repo" = l10n ]; then
-        tag_name=v$release
-    else
-        app=${package#bande-} app=${app%%-l10n-*}
-        jq -e --arg a "$app" 'any(.[]; .type == "dir" and .name == $a)' "$work/apps.json" > /dev/null ||
-            fail "$package is for $app, but the run's commit has no apps/$app"
-        [[ $reserved != *" bande-$app "* ]] || fail "$package translates the desktop's bande-$app; an app may not take it"
-        tag_name=$app-v$release
-    fi
+    tag_name=v${BASH_REMATCH[1]}
     if ! grep -qxF "$tag_name" "$work/released" 2> /dev/null; then
         status=$(call "$api/repos/$repo/compare/$tag_name...$sha" | jq -r .status) ||
             fail "$package is built on $tag_name, which $repo does not have"
@@ -180,8 +141,7 @@ fetch_suite() {
         unzip -q -j "$work/$name.zip" '*.deb' -d "$work/$name" 2> /dev/null || fail "$name holds no packages"
         for deb in "$work/$name"/*.deb; do
             read -r package version deb_arch < <(dpkg-deb --show --showformat="\${Package} \${Version} \${Architecture}\n" "$deb")
-            [ "$deb_arch" = "$arch" ] || { [ "$source_repo" = apps ] && [ "$deb_arch" = all ] && [[ $package == *-l10n-* ]]; } ||
-                fail "$name holds $package for $deb_arch"
+            [ "$deb_arch" = "$arch" ] || fail "$name holds $package for $deb_arch"
             allowed=0
             for pattern in "${names[@]}"; do
                 # shellcheck disable=SC2053 # the names are glob patterns
@@ -189,9 +149,6 @@ fetch_suite() {
             done
             [ "$allowed" = 1 ] || fail "$(basename "$deb") is $package, which $source_repo does not publish"
             [[ $repository_packages != *" $package "* ]] || fail "$package is built by apt itself; $source_repo may not publish it"
-            if [ "$source_repo" = apps ]; then
-                [[ $reserved != *" $package "* ]] || fail "$package is the desktop's; an app may not take it"
-            fi
             if [ -n "${stamp:-}" ]; then
                 l10n_version "$package" "$version" "$number"
             elif [ "$version" != "$want_version~deb$number" ]; then
@@ -229,23 +186,9 @@ for suite in $suites; do
 done
 [ -n "$fetched" ] || fail "run $run has no bande-debs-SUITE-ARCH artifacts for any suite of conf/suites: ${suites//$'\n'/ }"
 
-describe() { dpkg-deb --show --showformat="\${Package} \${Architecture} \${Version}\n" "$1"; }
 for suite in $fetched; do
     mkdir -p "$out/$suite"
-    for deb in "$work/stage/$suite"/*.deb; do
-        read -r package arch version < <(describe "$deb")
-        keep=1
-        for held in "$out/$suite"/*.deb; do
-            read -r held_package held_arch held_version < <(describe "$held")
-            [ "$held_package $held_arch" = "$package $arch" ] || continue
-            if dpkg --compare-versions "$version" gt "$held_version"; then
-                rm "$held"
-            else
-                keep=0
-            fi
-        done
-        if [ "$keep" = 1 ]; then mv "$deb" "$out/$suite/"; fi
-    done
+    mv "$work/stage/$suite"/*.deb "$out/$suite/"
 done
 
 echo "component=$component"
