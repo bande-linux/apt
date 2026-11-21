@@ -5,7 +5,8 @@ The APT repository for the Bande desktop, served by GitHub Pages at
 signs the published site. The site itself is deployed as a Pages artifact and is not stored in
 git.
 
-Install instructions for users are on the site ([`site/index.html`](site/index.html)).
+Install instructions for users are on the site ([`site/index.html`](site/index.html)), styled by
+the website's `/style.css`.
 
 ## The archive
 
@@ -17,7 +18,7 @@ Each suite has one component, `main`, and the suites share one pool:
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
 | `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
-| `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`, with its language packs `bande-<app>-l10n-*`: Terminal, Software, the Package Installer and System Monitor (recommended by `bande-desktop`), Mail, Calendar |
+| `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for every `apps/<app>`, with its language packs `bande-<app>-l10n-*`; `bande-desktop` recommends those in the desktop's `packaging/bande-desktop/default-apps` |
 | `main` | amd64, arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/web` that built the browser | `bande-browser`, `bande-browser-l10n-*` |
 | `main` | all | green `l10n.yml` runs of `l10n-YYYYMMDD[.N]` tag pushes of `bande-linux/desktop` and of `bande-linux/apps`, the tagged commit on `main`: translation-only builds | `bande-desktop-l10n-*`, `bande-<app>-l10n-*`, each at `<release>+l10nYYYYMMDD[.N]` |
 | `main` | all | green `dict.yml` runs of `dict-YYYYMMDD` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-dict-*`, Dictionary's packs |
@@ -73,8 +74,7 @@ repository may publish them, so the archive depends on none of them.
 
 Each package name belongs to one source repository. The site keeps the owners in
 `state/owners`, and a publish refuses a name another source already publishes. An app can never
-take a name the desktop publishes. [`conf/handovers`](conf/handovers) moves a name from one source
-to another.
+take a name the desktop publishes.
 
 ## How a publish works
 
@@ -119,10 +119,9 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    `apt-publish` environment. Releases of several repositories found together go out in one
    publish.
 
-Publishes share
-the `pages` concurrency group, so they run one at a time. GitHub keeps only the newest pending
-run of a group and cancels the one it replaces; that loses nothing, since the next look finds the
-same releases.
+   Publishes share the `pages` concurrency group, so they run one at a time. GitHub keeps only
+   the newest pending run of a group and cancels the one it replaces; that loses nothing, since
+   the next look finds the same releases.
 
 1. [`scripts/fetch-run.sh`](scripts/fetch-run.sh) checks the run:
    - it must come from the repository's release workflow and end in success (for a run given
@@ -182,7 +181,7 @@ same releases.
      skipped, so a translation-only build never replaces a newer release's packs;
    - an apps package whose `apps/<app>` directory is gone from the apps' `main` (`--apps-dirs`,
      which every publish passes) leaves the archive with its packs, as Debian drops the binaries
-     a source no longer builds; a renamed app publishes under its new name only;
+     a source no longer builds;
    - it refuses a name that `state/owners` gives to another source;
    - reprepro builds the pool and the `Packages` indexes; `apt-ftparchive release` writes each
      suite's `Release` with SHA256 sums, `Acquire-By-Hash: yes` and `Valid-Until` 14 days out, and copies every index to
@@ -204,9 +203,10 @@ archive are valid for 7 days and re-signed every few hours; this archive changes
 it is valid for 14 days (`APT::FTPArchive::Release::ValidTime` in `rebuild.sh`) and look re-signs
 it once fewer than 7 days remain, about once a week. A re-sign is an ordinary publish with
 nothing new: it rebuilds, signs, keeps the by-hash generations and verifies as any other.
-If the re-signs keep failing until it passes, the live `InRelease` expires and apt clients refuse it. Look
-then takes no new runs from it, since an expired index could be a replay, logs a warning and
-starts "Re-sign the archive"; `rebuild.sh` still requires the archive key's signatures on it.
+If the re-signs keep failing until `Valid-Until` passes, the live `InRelease` expires and apt
+clients refuse it. Look then takes no new runs from it, since an expired index could be a replay,
+logs a warning and starts "Re-sign the archive"; `rebuild.sh` still requires the archive key's
+signatures on it.
 
 ## Pages caching
 
@@ -229,6 +229,8 @@ own. For up to ten minutes after a publish it can serve a new `InRelease` beside
   `?nonce` does not get past it, but it keys on the literal path, which Pages decodes: the
   script percent-encodes a random set of the path's letters (never the `/apt` site root, which
   Pages routes before decoding) and refuses an answer with an `Age` above 0.
+
+## Workflow
 
 - **Access:** `github.token` with `actions: read` and `contents: read`; `desktop`, `web` and
   `apps` are public, so no other token or GitHub App is involved.

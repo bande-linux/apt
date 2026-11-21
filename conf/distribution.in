@@ -4,5 +4,5 @@ Codename: @SUITE@
 Suite: @SUITE@
 Architectures: amd64 arm64
 Components: main
-Description: Bande for Debian @NUMBER@ (@SUITE@): the desktop and apps, every green build
+Description: Bande for Debian @NUMBER@ (@SUITE@)
 DebIndices: Packages Release . .gz .xz

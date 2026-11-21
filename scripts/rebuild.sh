@@ -1,57 +1,13 @@
 #!/bin/bash
 # Usage: rebuild.sh --live URL --add|--add-each|--add-l10n SOURCE:COMPONENT=DIR [...] --out DIR
 #                   [--processed SOURCE=ID,...] [--apps-dirs "DIR ..."] [--conf DIR] [--cache DIR]
-# Rebuilds the whole archive, every suite conf/suites lists, from the live,
-# signature-checked site plus the packages in each DIR/SUITE, which come from
-# the repository SOURCE and go to its COMPONENT of SUITE, signs
-# it with the keys in conf/signing-keys (secret keys in $GNUPGHOME) and writes
-# the site to --out. A DIR may hold packages for some suites only.
-# - --add: one build, whose packages on each architecture carry one version; a
-#   version older than the published one, or one published with other
-#   contents, is refused.
-# - --add-each: packages built on their own; one whose version is already
-#   published, or older, is skipped.
-# - --add-l10n: language packs of a translation-only build, each at
-#   RELEASE+l10nSTAMP for the package it enhances at RELEASE. A pack is added only
-#   while that package is at RELEASE in the archive, after this publish's other
-#   additions, so a pack built on an older release, or on one not published
-#   yet, is skipped; otherwise as --add-each.
-# Each package keeps its newest version only, in each suite. The suites share one
-# pool. A component the live site serves but conf/distribution.in no longer
-# lists is dropped, with its pool files and its names in state/owners.
-#
-# The site also keeps state/owners, the source each package comes from: a
-# package of another source's name is refused, unless conf/handovers moves it:
-# "PACKAGE FROM TO" gives a name FROM published to TO. With --apps-dirs "DIR
-# ...", the apps/ directories on the apps' main, an apps package of no such
-# directory leaves the archive. And state/processed, the runs
-# of each source already taken (--processed adds to it), which find-runs.sh
-# reads.
-#
-# Release is written by apt-ftparchive, with Acquire-By-Hash: every index is
-# also published under by-hash/SHA256/<sha256>, which never changes, so a client
-# holding any InRelease the Pages CDN served finds the matching indexes.
-# Each by-hash directory keeps the last $by_hash_keep generations of them
-# (pruned here: apt-ftparchive's By-Hash-Keep skips a suite's first directory);
-# state/by-hash lists them, since Pages cannot list a directory, and
-# the next publish restores them from the live site. Mutable files (InRelease,
-# state) are read past the CDN with fetch-fresh.sh, indexes by hash.
-#
-# A suite the live site does not serve yet (no dists/SUITE/InRelease) starts
-# empty. A site that serves no suite's InRelease nor key.asc has never been
-# published, and the archive starts empty. One that serves key.asc but no
-# suite's InRelease is refused, so a broken site is never published over.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/suites.sh
 . "$here/suites.sh"
-# The keyring and source packages are built by this repository (source apt) and
-# live in main.
 repository_packages=" bande-archive-keyring bande-apt-source "
 by_hash_keep=3
-# Valid-Until, as Debian's archives set it: apt refuses an InRelease past it, so
-# an old one cannot be replayed. look.yml re-signs once fewer than 7 days remain.
 valid_days=14
 
 conf=$here/../conf
@@ -88,11 +44,8 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/pool" "$work/live"
 gpg --batch --quiet --dearmor < "$conf/archive-key.asc" > "$work/keyring.gpg"
 
-# conf/distribution.in is the reprepro stanza of every suite, @SUITE@ its
-# codename and @NUMBER@ its Debian version number.
 suites=$(suite_list "$conf") || fail "conf/suites is not usable"
 stanza() { sed -e "s/@SUITE@/$1/g" -e "s/@NUMBER@/$(suite_number "$1")/g" "$conf/distribution.in"; }
-# field SUITE FIELD: a field of SUITE's stanza.
 field() { stanza "$1" | awk -v f="$2" 'index($0, f ": ") == 1 { sub("^" f ": ", ""); print; exit }'; }
 components=$(field "${suites%%$'\n'*}" Components)
 architectures=$(field "${suites%%$'\n'*}" Architectures)
@@ -117,8 +70,6 @@ get() {
     esac
 }
 
-# fresh PATH OUT: like get for $live/PATH, past the Pages CDN, for files a
-# publish replaces.
 fresh() {
     local code
     code=$("$here/fetch-fresh.sh" "$live" "$1" "$2") || fail "cannot fetch $live/$1"
@@ -129,7 +80,6 @@ fresh() {
     esac
 }
 
-# live_index SUITE PATH SHA256 OUT: an index of the live SUITE's Release, by hash.
 live_index() {
     get "$live/dists/$1/$(dirname "$2")/by-hash/SHA256/$3" "$4" || fail "$1/$2 is listed but missing"
     echo "$3  $4" | sha256sum -c --quiet - || fail "$1/$2 does not match Release"
@@ -155,8 +105,6 @@ describe() {
     dpkg-deb --show --showformat="\${Package} \${Architecture} \${Version}\n" "$1"
 }
 
-# Rows: "SUITE/COMPONENT PACKAGE ARCH VERSION FILE", the live packages and then
-# the new ones.
 : > "$work/rows"
 live_suites=''
 for suite in $suites; do
@@ -178,7 +126,6 @@ for suite in $suites; do
             index=$c/binary-$arch/Packages.xz
             sha=$(release_sha256 "$dist/Release" "$index")
             if [ -z "$sha" ]; then
-                # A component or architecture added since the last publish.
                 echo "rebuild: $suite/Release does not list $index yet; starting it empty"
                 continue
             fi
@@ -217,14 +164,10 @@ newest() {
 
 shopt -s nullglob
 : > "$work/new"
-handovers=$conf/handovers
-[ -f "$handovers" ] || handovers=/dev/null
-awk 'FILENAME == ARGV[1] { if ($0 !~ /^#/ && NF == 3) to[$1 " " $2] = $3; next }
-    ($1 " " $2) in to { $2 = to[$1 " " $2] } { print }' "$handovers" "$work/owners" > "$work/claims"
+cp "$work/owners" "$work/claims"
 for batch in "${batches[@]}"; do
     mode=${batch%% *} batch=${batch#* }
     source=${batch%%:*} component=${batch#*:} component=${component%%=*} debs=${batch#*=}
-    # DIR holds one directory per suite; one it lacks gets nothing.
     stray=("$debs"/*.deb)
     [ ${#stray[@]} -eq 0 ] || fail "$debs holds packages outside a suite's directory"
     for dir in "$debs"/*/; do
@@ -247,8 +190,6 @@ for batch in "${batches[@]}"; do
     [ -s "$work/batch" ] || fail "no packages in $debs"
     awk -v s="$source" '{ print $3, s }' "$work/batch" | sort -u >> "$work/claims"
 
-    # One build: in each suite, on each architecture, its own and the
-    # architecture-independent packages carry one version.
     awk '{ print $2 }' "$work/batch" | sort -u > "$work/dists"
     while [ "$mode" = one ] && read -r c; do
         built=$(awk -v c="$c" '$2 == c && $4 != "all" { print $4 }' "$work/batch" | sort -u)
@@ -261,7 +202,6 @@ for batch in "${batches[@]}"; do
     cat "$work/batch" >> "$work/new"
 done
 
-# add MODE COMPONENT PACKAGE ARCH VERSION DEB: one new package, as its mode says.
 add() {
     local mode=$1 c=$2 package=$3 arch=$4 version=$5 deb=$6 sha same top base release served
     if [ "$mode" = l10n ]; then
@@ -301,7 +241,6 @@ add() {
     echo "$c $package $arch $version $work/pool/$sha.deb" >> "$work/rows"
     echo "rebuild: adding $package $version ($arch) to $c"
 }
-# Language packs last, against the releases this publish adds.
 while read -r mode c package arch version deb; do
     [ "$mode" = l10n ] || add "$mode" "$c" "$package" "$arch" "$version" "$deb"
 done < "$work/new"
@@ -309,9 +248,6 @@ while read -r mode c package arch version deb; do
     [ "$mode" != l10n ] || add "$mode" "$c" "$package" "$arch" "$version" "$deb"
 done < "$work/new"
 
-# --apps-dirs: the apps/ directories on the apps' main. An apps package of none
-# of them (bande-DIR or its packs bande-DIR-l10n-*) leaves the archive, as Debian
-# drops the binaries a source no longer builds.
 if [ -n "${apps_dirs+set}" ]; then
     awk -v dirs="$apps_dirs" 'BEGIN { n = split(dirs, d, " "); for (i = 1; i <= n; i++) built["bande-" d[i]] = 1 }
         FILENAME == ARGV[1] { if ($2 == "apps") apps[$1] = 1; next }
@@ -340,10 +276,6 @@ while read -r c _ _ _ path; do
 done < "$work/chosen"
 reprepro --silent -b "$work/repo" export
 
-# The earlier generations' by-hash files, as state/by-hash lists them: "MTIME
-# PATH", where PATH is under dists/ and starts with its suite. apt-ftparchive
-# keeps the newest by mtime, so each keeps its exact time there, since two
-# quick publishes would tie on the whole-second Release Date.
 public=$work/repo/public/dists
 : > "$work/by-hash"
 if [ -n "$live_suites" ]; then
@@ -353,7 +285,6 @@ sort -k2,2 -u "$work/by-hash" | while read -r mtime path; do
     [[ $mtime =~ ^[0-9]+(\.[0-9]+)?$ && $path =~ ^([a-z0-9-]+/)+by-hash/SHA256/([0-9a-f]{64})$ ]] ||
         fail "state/by-hash lists $mtime $path"
     sha=${path##*/} dest=$public/$path
-    # A directory the archive no longer has keeps nothing.
     [ -d "$public/${path%/by-hash/*}" ] || continue
     mkdir -p "$(dirname "$dest")"
     if ! get "$live/dists/$path" "$dest"; then
@@ -365,11 +296,6 @@ sort -k2,2 -u "$work/by-hash" | while read -r mtime path; do
     touch -d "@$mtime" "$dest"
 done
 
-# Each suite's Release, by apt-ftparchive: SHA256 sums, Acquire-By-Hash,
-# Valid-Until $valid_days days out, and by-hash copies of every index. Each
-# by-hash directory then keeps the files of its newest $by_hash_keep
-# generations, a generation being one file per index beside it; apt-ftparchive
-# prunes only some directories, depending on their order, so it prunes none.
 signers=()
 for key in $signing_keys; do signers+=(--local-user "$key"); done
 for suite in $suites; do

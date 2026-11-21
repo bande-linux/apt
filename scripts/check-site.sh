@@ -26,7 +26,6 @@ for inrelease in "$site"/dists/*/InRelease; do
         while read -r sha path; do
             [ -e "$dist/$path" ] || fail "$dist/$path is listed in Release but missing"
             echo "$sha  $dist/$path" | sha256sum -c --quiet - || fail "$dist/$path does not match Release"
-            # apt fetches every index but the components' Release files.
             [[ $path == */* && $path != */Release ]] || continue
             [ -e "$dist/${path%/*}/by-hash/SHA256/$sha" ] || fail "$dist/$path is not served by hash"
         done

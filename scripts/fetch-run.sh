@@ -1,39 +1,7 @@
 #!/bin/bash
 # Usage: fetch-run.sh REPO RUN_ID OUT_DIR [CONF_DIR]
-# Verifies a CI run of bande-linux/REPO (desktop, dict, l10n, web, apps or
-# apps-l10n): the repository's release workflow, finished green, its commit on main.
-# Every package built for a suite carries the suite's ~debNN (suites.sh) right
-# after its release version, written ~debNN below:
-# - desktop: the push of a vX.Y.Z tag that points at the run's commit; its
-#   packages carry X.Y.Z~debNN.
-# - dict: the desktop's dict.yml push of a dict-YYYYMMDD tag that points at
-#   the run's commit; it carries bande-dict-* packages alone, at YYYYMMDD~debNN.
-# - l10n: the desktop's l10n.yml push of an l10n-YYYYMMDD[.N] tag that points at
-#   the run's commit; it carries bande-desktop-l10n-* packs alone, each at
-#   RELEASE~debNN+l10nYYYYMMDD[.N], where vRELEASE is a desktop tag on the run's
-#   commit's history.
-# - web: a schedule or dispatch on main, naming its base version with one
-#   bande-version-VERSION artifact; its packages carry VERSION~debNN.
-# - apps: the push of an <app>-vX.Y.Z tag that points at the run's commit, for
-#   an apps/<app> at that commit; it carries bande-<app> alone, at X.Y.Z~debNN,
-#   never a name of the desktop's, and its packs bande-<app>-l10n-*,
-#   architecture all, in each architecture's artifact. Dispatch runs are test
-#   builds and never published.
-# - apps-l10n: the apps' l10n.yml push of an l10n-YYYYMMDD[.N] tag that points at
-#   the run's commit; it carries bande-<app>-l10n-* packs alone, for apps/<app>
-#   at that commit, each at RELEASE~debNN+l10nYYYYMMDD[.N], where <app>-vRELEASE
-#   is a tag on the run's commit's history.
-# Then, for each suite in CONF_DIR/suites (default conf/), downloads its
-# bande-debs-SUITE-ARCH artifacts into OUT_DIR/SUITE and checks that they carry
-# only the repository's own package names, every architecture it builds and
-# the same packages for each. A run without any artifact of a suite (built
-# before the suite was listed) leaves that suite alone; it must carry at least
-# one. A package OUT_DIR already holds at a newer version is left, so several
-# apps runs merge. Prints component= and appends it to $GITHUB_OUTPUT when set.
-# Needs GH_TOKEN; the repositories are public.
-#
-# A run given by hand may still be going; this waits up to $FETCH_RUN_WAIT
-# seconds (default 900) for it to end.
+#        REPO: desktop, dict, l10n, web, apps or apps-l10n. Needs GH_TOKEN; waits up to
+#        $FETCH_RUN_WAIT seconds (default 900) for a run still going.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -41,19 +9,13 @@ source_repo=$1 run=$2 out=$3 conf=${4:-$here/../conf} stamp=""
 api=${GITHUB_API_URL:-https://api.github.com}
 wait_limit=${FETCH_RUN_WAIT:-900}
 poll=${FETCH_RUN_POLL:-15}
-# Built by apt itself; no source repository may publish them.
 repository_packages=" bande-archive-keyring bande-apt-source "
-# Names the desktop and the web repository publish, which an app may never take; the
-# desktop's packaging/ directories are added from its main branch.
 reserved=" xdg-desktop-portal-bande libpam-bande-secrets bande-desktop bande-browser "
 fail() { echo "fetch-run: $*" >&2; exit 1; }
 # shellcheck source=scripts/suites.sh
 . "$here/suites.sh"
 suites=$(suite_list "$conf") || fail "conf/suites is not usable"
 
-# Per repository: its workflow, the events it publishes from, the package names
-# it may publish, the component they go to, the architectures it must build
-# (all: architecture-independent packages).
 case $source_repo in
     desktop)
         workflow=.github/workflows/release.yml
@@ -179,9 +141,6 @@ if [ "$source_repo" = apps ] || [ "$source_repo" = apps-l10n ]; then
         fail "cannot list the desktop's packaging/"
     reserved+="$(jq -r '.[] | select(.type == "dir") | .name' "$work/packaging.json" | tr '\n' ' ')"
 fi
-# l10n_version PACKAGE VERSION NUMBER: a pack of an l10n tag carries
-# RELEASE~debNUMBER+l10n$stamp, where the release tag of the program it
-# translates is on the run's history.
 l10n_version() {
     local package=$1 version=$2 number=$3 app release tag_name status
     [[ $version =~ ^([0-9]+\.[0-9]+\.[0-9]+)~deb$number\+l10n([0-9.]+)$ ]] && [ "${BASH_REMATCH[2]}" = "$stamp" ] ||
@@ -206,7 +165,6 @@ l10n_version() {
     fi
 }
 
-# fetch_suite SUITE: SUITE's artifacts of the run, checked, into $work/stage/SUITE.
 fetch_suite() {
     local suite=$1 number arch name id deb package version deb_arch allowed pattern expected first got split
     number=$(suite_number "$suite")
@@ -244,8 +202,6 @@ fetch_suite() {
         done
     done
 
-    # Every architecture-specific package must be built for every architecture, or
-    # machines of the one that lacks it would be left with a mismatched set.
     expected='' first=''
     for arch in "${architectures[@]}"; do
         [ "$arch" != all ] || continue
@@ -264,7 +220,6 @@ shopt -s nullglob
 fetched=''
 for suite in $suites; do
     prefix=bande-debs-$suite-
-    # A run built before the suite was listed leaves it as it is.
     if ! jq -e --arg p "$prefix" 'any(.artifacts[]; .name | startswith($p))' "$work/artifacts.json" > /dev/null; then
         echo "fetch-run: run $run built nothing for $suite; it stays as it is" >&2
         continue

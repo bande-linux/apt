@@ -154,7 +154,7 @@ check "a run still finishing is waited for" env FETCH_RUN_WAIT=20 "$root/scripts
 wait
 
 d=$(case_dir); desktop_debs "$d"; api "$d" desktop
-refuses "an unknown repository is refused" "unknown repository" fetch images "$d/out"
+refuses "an unknown repository is refused" "unknown repository" fetch nonexistent "$d/out"
 d=$(case_dir); desktop_debs "$d"; workflow=ci.yml api "$d" desktop
 refuses "another workflow is refused" "not .github/workflows/release.yml" fetch desktop "$d/out"
 d=$(case_dir); for a in amd64 arm64; do make_deb "$d/art/forky-$a" bande-compositor "$web_version$x" $a; done; api "$d" web
