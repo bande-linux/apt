@@ -7,7 +7,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/suites.sh
 . "$here/suites.sh"
 repository_packages=" bande-archive-keyring bande-apt-source "
-sources=" apt desktop dict web "
+sources=" apt browser desktop dict "
 by_hash_keep=3
 valid_days=14
 

@@ -119,7 +119,7 @@ check "the source package is 1.1" both "$scratch/apt-new" main bande-apt-source=
 
 desktop 5 0.0.0+git20261031.5.eeeeeee
 browser w5 153.6.0esr-1+bande1
-check "one publish takes a desktop and a browser" rebuild --live "$live" --add desktop:main="$scratch/in-5" --add web:main="$scratch/in-w5" --out "$scratch/both"
+check "one publish takes a desktop and a browser" rebuild --live "$live" --add desktop:main="$scratch/in-5" --add browser:main="$scratch/in-w5" --out "$scratch/both"
 check "main takes the desktop" both "$scratch/both" main bande-compositor=0.0.0+git20261031.5.eeeeeee
 check "and the browser" both "$scratch/both" main bande-browser=153.6.0esr-1+bande1
 check "the oldest generation's indexes leave by hash" test ! -e "$(by_hash "$scratch/site-1" main/binary-amd64/Packages.xz | sed "s|site-1|both|")"
@@ -135,15 +135,15 @@ check "a publish over it" rebuild --live "$(serve "$early")" --add desktop:main=
 check "the by-hash files keep the exact times state/by-hash lists" awk -v p="$live_xz" '
     FNR == 1 { n++ } $2 == p { t[n] = $1 } END { exit !(t[1] != "" && t[1] - t[2] < 0.001 && t[2] - t[1] < 0.001) }' \
     "$early/state/by-hash" "$scratch/early-out/state/by-hash"
-refuses "every batch is checked" "built by apt itself, not web" \
-    rebuild --live "$live" --add desktop:main="$scratch/in-5" --add web:main="$scratch/in-misplaced" --out "$scratch/both-bad"
+refuses "every batch is checked" "built by apt itself, not browser" \
+    rebuild --live "$live" --add desktop:main="$scratch/in-5" --add browser:main="$scratch/in-misplaced" --out "$scratch/both-bad"
 
 make_deb "$scratch/in-desktop-claims/forky" bande-weather 0.3.0 all
-for arch in amd64 arm64; do make_deb "$scratch/in-web-claims/forky" bande-weather 0.3.0 $arch; done
-refuses "two sources may not claim one name in one publish" "is published from desktop, not web" \
-    rebuild --live "$live" --add desktop:main="$scratch/in-desktop-claims" --add web:main="$scratch/in-web-claims" --out "$scratch/both-claim"
+for arch in amd64 arm64; do make_deb "$scratch/in-browser-claims/forky" bande-weather 0.3.0 $arch; done
+refuses "two sources may not claim one name in one publish" "is published from desktop, not browser" \
+    rebuild --live "$live" --add desktop:main="$scratch/in-desktop-claims" --add browser:main="$scratch/in-browser-claims" --out "$scratch/both-claim"
 refuses "a source the archive does not take is refused" "the archive takes no source apps" \
-    rebuild --live "$live" --add-each apps:main="$scratch/in-web-claims" --out "$scratch/unknown-source"
+    rebuild --live "$live" --add-each apps:main="$scratch/in-browser-claims" --out "$scratch/unknown-source"
 
 make_deb "$scratch/in-arm64/forky" bande-compositor "$d1" arm64
 make_deb "$scratch/in-arm64/forky" bande-desktop "$d1" all
@@ -282,8 +282,8 @@ for a in amd64 arm64; do
     make_deb "$scratch/in-r0/forky" bande-clock 0.1.0~deb14 $a
 done
 packs "$scratch/in-r0" bande-viewer 0.1.0~deb14
-rebuild --live "$(serve "$empty")" --add web:main="$scratch/in-r0" --add-each apt:main="$scratch/in-apt" --out "$scratch/r0" > /dev/null
-sed -i 's/^\(bande-viewer[^ ]*\|bande-clock\) web$/\1 apps/' "$scratch/r0/state/owners"
+rebuild --live "$(serve "$empty")" --add browser:main="$scratch/in-r0" --add-each apt:main="$scratch/in-apt" --out "$scratch/r0" > /dev/null
+sed -i 's/^\(bande-viewer[^ ]*\|bande-clock\) browser$/\1 apps/' "$scratch/r0/state/owners"
 for a in amd64 arm64; do make_deb "$scratch/in-r1/forky" bande-clock 0.2.0~deb14 $a; done
 make_deb "$scratch/in-r1/forky" bande-desktop 0.2.0~deb14 all
 check "a publish over packages of a source the archive no longer takes" sh -c "'$root/scripts/rebuild.sh' --conf '$conf' \

@@ -9,21 +9,21 @@ export GH_TOKEN=test
 # A live archive serving desktop 0.1.0, browser 153.6.0esr-1+bande1 and
 # repository packages 1.0.
 for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop/forky" $p 0.1.0 all; done
-for a in amd64 arm64; do make_deb "$scratch/web/forky" bande-browser 153.6.0esr-1+bande1 $a; done
+for a in amd64 arm64; do make_deb "$scratch/browser/forky" bande-browser 153.6.0esr-1+bande1 $a; done
 REPOSITORY_VERSION=1.0 "$root/scripts/build-repository-packages.sh" "$scratch/apt" > /dev/null
 empty=$(mktemp -d -p "$scratch")
 "$root/scripts/rebuild.sh" --conf "$conf" --live "$(serve "$empty")" \
-    --add desktop:main="$scratch/desktop" --add web:main="$scratch/web" \
+    --add desktop:main="$scratch/desktop" --add browser:main="$scratch/browser" \
     --add-each apt:main="$scratch/apt" \
     --out "$scratch/site" > /dev/null
 live=$(serve "$scratch/site")
 
 # api DIR: the GitHub API of the source repositories. $desktop_runs lists the
-# desktop's release runs as ID:TAG:CONCLUSION, newest first; $web_runs web's
-# runs with a version artifact as ID:VERSION:CONCLUSION[:EVENT].
+# desktop's release runs as ID:TAG:CONCLUSION, newest first; $browser_runs the
+# browser's runs with a version artifact as ID:VERSION:CONCLUSION[:EVENT].
 api() {
     local d=$1 run id tag version conclusion event base=$1/repos/bande-linux
-    mkdir -p "$base/desktop/actions/workflows/release.yml" "$base/web/actions/runs" "$base/web/actions/artifacts"
+    mkdir -p "$base/desktop/actions/workflows/release.yml" "$base/desktop/actions/runs" "$base/desktop/actions/artifacts"
     echo '{"workflow_runs": []}' > "$base/desktop/actions/workflows/release.yml/runs"
     for run in ${desktop_runs:-}; do
         IFS=: read -r id tag conclusion <<< "$run"
@@ -32,14 +32,14 @@ api() {
             "$base/desktop/actions/workflows/release.yml/runs" > "$d/x" && mv "$d/x" "$base/desktop/actions/workflows/release.yml/runs"
     done
     echo '{"artifacts": [{"name": "bande-debs-forky-arm64", "expired": false, "workflow_run": {"id": 1}}]}' \
-        > "$base/web/actions/artifacts/index.html"
-    for run in ${web_runs:-}; do
+        > "$base/desktop/actions/artifacts/index.html"
+    for run in ${browser_runs:-}; do
         IFS=: read -r id version conclusion event <<< "$run"
         jq --argjson i "$id" --arg n "bande-version-$version" '.artifacts += [{name: $n, expired: false, workflow_run: {id: $i}}]' \
-            "$base/web/actions/artifacts/index.html" > "$d/x" && mv "$d/x" "$base/web/actions/artifacts/index.html"
+            "$base/desktop/actions/artifacts/index.html" > "$d/x" && mv "$d/x" "$base/desktop/actions/artifacts/index.html"
         jq -n --arg c "$conclusion" --arg e "${event:-schedule}" \
-            '{path: ".github/workflows/follow-debian.yml", head_branch: "main", event: $e, conclusion: $c}' \
-            > "$base/web/actions/runs/$id"
+            '{path: ".github/workflows/browser-follow-debian.yml", head_branch: "main", event: $e, conclusion: $c}' \
+            > "$base/desktop/actions/runs/$id"
     done
     mkdir -p "$base/desktop/actions/workflows/dict.yml"
     echo '{"workflow_runs": []}' > "$base/desktop/actions/workflows/dict.yml/runs"
@@ -69,28 +69,28 @@ api() {
 }
 find_runs() { "$root/scripts/find-runs.sh" "${2:-$live}" "$conf" > "$1"; }
 
-d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" web_runs="40:153.6.0esr-1+bande1:success" api "$d"
+d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" browser_runs="40:153.6.0esr-1+bande1:success" api "$d"
 check "nothing new finds nothing" find_runs "$d/out"
 check "it prints no run" test ! -s "$d/out"
 check "it says what is published" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'desktop 0.1.0 (run 30) is published'"
 
-d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success 30:v0.1.0:success" web_runs="40:153.6.0esr-1+bande1:success" api "$d"
+d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success 30:v0.1.0:success" browser_runs="40:153.6.0esr-1+bande1:success" api "$d"
 check "a new desktop tag is found" find_runs "$d/out"
 check "only the desktop run is printed" diff <(echo "desktop 31") "$d/out"
 
-d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" web_runs="41:153.7.0esr-1+bande1:success 40:153.6.0esr-1+bande1:success" api "$d"
+d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" browser_runs="41:153.7.0esr-1+bande1:success 40:153.6.0esr-1+bande1:success" api "$d"
 check "a new browser is found" find_runs "$d/out"
-check "only the web run is printed" diff <(echo "web 41") "$d/out"
+check "only the browser run is printed" diff <(echo "browser 41") "$d/out"
 
-d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" web_runs="41:153.7.0esr-1+bande1:success:workflow_dispatch" api "$d"
+d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" browser_runs="41:153.7.0esr-1+bande1:success:workflow_dispatch" api "$d"
 check "both new are found" find_runs "$d/out"
-check "both runs are printed" diff <(printf 'desktop 31\nweb 41\n') "$d/out"
+check "both runs are printed" diff <(printf 'desktop 31\nbrowser 41\n') "$d/out"
 
-d=$(mktemp -d -p "$scratch"); desktop_runs="32:v0.3.0:failure 30:v0.1.0:success" web_runs="42:153.8.0esr-1+bande1:failure 40:153.6.0esr-1+bande1:success" api "$d"
+d=$(mktemp -d -p "$scratch"); desktop_runs="32:v0.3.0:failure 30:v0.1.0:success" browser_runs="42:153.8.0esr-1+bande1:failure 40:153.6.0esr-1+bande1:success" api "$d"
 check "red runs are ignored" find_runs "$d/out"
 check "nothing is printed for them" test ! -s "$d/out"
 
-d=$(mktemp -d -p "$scratch"); desktop_runs="33:main:success 34:v0.4:success 30:v0.1.0:success" web_runs="43:153.8.0esr-1+bande1:success:push" api "$d"
+d=$(mktemp -d -p "$scratch"); desktop_runs="33:main:success 34:v0.4:success 30:v0.1.0:success" browser_runs="43:153.8.0esr-1+bande1:success:pull_request" api "$d"
 check "runs that are not releases are ignored" find_runs "$d/out"
 check "nothing is printed for those" test ! -s "$d/out"
 
@@ -98,9 +98,9 @@ d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success 35:v0.0.9:success"
 check "an older tag is not published again" find_runs "$d/out"
 check "the highest tag decides" test ! -s "$d/out"
 
-d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" web_runs="40:153.6.0esr-1+bande1:success" api "$d"
+d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" browser_runs="40:153.6.0esr-1+bande1:success" api "$d"
 check "an empty site takes every release" find_runs "$d/out" "$(serve "$empty")"
-check "both are printed for it" diff <(printf 'desktop 30\nweb 40\n') "$d/out"
+check "both are printed for it" diff <(printf 'desktop 30\nbrowser 40\n') "$d/out"
 
 d=$(mktemp -d -p "$scratch"); dict_runs="81:dict-20261108:success 80:dict-20261101:success 82:dict-2026:success 83:dict-20261201:failure" api "$d"
 check "the highest green dictionary tag is found" find_runs "$d/out"
@@ -130,14 +130,14 @@ d=$(mktemp -d -p "$scratch"); l10n_runs="90:l10n-20261108:success" desktop_tags=
     on_history="v0.1.0" api "$d"
 check "taken language pack runs are not taken again" find_runs "$d/out" "$(serve "$scratch/site-l10n")"
 check "nothing is printed for them" test ! -s "$d/out"
-d=$(mktemp -d -p "$scratch"); mkdir -p "$d/repos/bande-linux/web/actions/runs" "$d/repos/bande-linux/web/actions/artifacts"
+d=$(mktemp -d -p "$scratch"); mkdir -p "$d/repos/bande-linux/desktop/actions/runs" "$d/repos/bande-linux/desktop/actions/artifacts"
 jq -n '{artifacts: [{name: "bande-version-153.7.0esr-1+bande1", expired: false, workflow_run: {id: 41}}]}' \
-    > "$d/repos/bande-linux/web/actions/artifacts/index.html"
-jq -n '{path: ".github/workflows/follow-debian.yml", head_branch: "main", event: "schedule", conclusion: "success"}' \
-    > "$d/repos/bande-linux/web/actions/runs/41"
+    > "$d/repos/bande-linux/desktop/actions/artifacts/index.html"
+jq -n '{path: ".github/workflows/browser-follow-debian.yml", head_branch: "main", event: "schedule", conclusion: "success"}' \
+    > "$d/repos/bande-linux/desktop/actions/runs/41"
 GITHUB_API_URL=$(serve "$d")
 check "repositories that do not exist yet are nothing new" find_runs "$d/out"
-check "the others are still found" diff <(echo "web 41") "$d/out"
+check "the others are still found" diff <(echo "browser 41") "$d/out"
 check "it says which are missing" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q \"the desktop's release runs not found (HTTP 404)\""
 broken=$(mktemp -d -p "$scratch")
 cat > "$broken/server.py" <<'PY2'

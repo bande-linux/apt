@@ -1,6 +1,6 @@
 #!/bin/bash
 # Usage: fetch-run.sh REPO RUN_ID OUT_DIR [CONF_DIR]
-#        REPO: desktop, dict, l10n or web. Needs GH_TOKEN; waits up to
+#        REPO: browser, desktop, dict or l10n. Needs GH_TOKEN; waits up to
 #        $FETCH_RUN_WAIT seconds (default 900) for a run still going.
 set -euo pipefail
 
@@ -37,19 +37,16 @@ case $source_repo in
         component=main
         architectures=(all)
         ;;
-    web)
-        workflow=.github/workflows/follow-debian.yml
-        events=(schedule workflow_dispatch)
-        names=(bande-browser 'bande-browser-l10n-*')
+    browser)
+        workflow=.github/workflows/browser-follow-debian.yml
+        events=(push schedule workflow_dispatch)
+        names=(bande-browser 'bande-browser-l10n-*' bande-firefox-esr-settings)
         component=main
         architectures=(amd64 arm64 all)
         ;;
-    *) fail "unknown repository $source_repo; the archive takes desktop, dict, l10n and web" ;;
+    *) fail "unknown repository $source_repo; the archive takes browser, desktop, dict and l10n" ;;
 esac
-case $source_repo in
-    dict | l10n) repo=bande-linux/desktop ;;
-    *) repo=bande-linux/$source_repo ;;
-esac
+repo=bande-linux/desktop
 
 call() {
     curl -fsSL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
@@ -64,7 +61,7 @@ read -r event path ref sha owner < <(jq -r '[.event, .path, .head_branch, .head_
 [ "$path" = "$workflow" ] || fail "run $run is from $path, not $workflow"
 [ "$owner" = "$repo" ] || fail "run $run built $owner, not $repo"
 [[ " ${events[*]} " == *" $event "* ]] || fail "run $run was started by $event; $source_repo publishes from ${events[*]}"
-if [ "$source_repo" != web ]; then
+if [ "$source_repo" != browser ]; then
     tag=${ref#refs/tags/}
     if [ "$source_repo" = l10n ]; then
         [[ $tag =~ ^l10n-([0-9]{8}(\.[0-9]+)?)$ ]] || fail "run $run built $ref; the language packs publish l10n-YYYYMMDD tags"
@@ -104,7 +101,7 @@ case $status in
 esac
 
 call "$api/repos/$repo/actions/runs/$run/artifacts?per_page=100" > "$work/artifacts.json"
-if [ "$source_repo" = web ]; then
+if [ "$source_repo" = browser ]; then
     mapfile -t named < <(jq -r '.artifacts[].name | select(startswith("bande-version-")) | ltrimstr("bande-version-")' \
         "$work/artifacts.json")
     [ ${#named[@]} -eq 1 ] || fail "run $run names ${#named[@]} versions; it must upload one bande-version-VERSION artifact"

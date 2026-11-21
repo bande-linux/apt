@@ -11,9 +11,9 @@
 #   version is the tag; the live one is bande-desktop's in main;
 # - dict: the green dict.yml push of the desktop's highest dict-YYYYMMDD tag,
 #   whose version is the date; the live one is bande-dict-en's in main;
-# - web: the newest green follow-debian.yml schedule or dispatch run on main of
-#   bande-linux/web with a bande-version-VERSION artifact, the browser; the live
-#   one is bande-browser's in main;
+# - browser: the newest green browser-follow-debian.yml run on main of the
+#   desktop with a bande-version-VERSION artifact; the live one is
+#   bande-browser's in main;
 # - l10n: the green l10n.yml push of the desktop's highest l10n-YYYYMMDD[.N]
 #   tag, translation-only language packs, unless the live state/processed, which
 #   holds the runs already taken or refused, lists the run. It waits while a
@@ -189,33 +189,27 @@ else
     echo "find-runs: the desktop has no green dict-YYYYMMDD run" >&2
 fi
 
-# follow_debian REPO COMPONENT PACKAGE: the newest green follow-debian.yml
-# schedule or dispatch run on main of REPO with a bande-version-VERSION
-# artifact, printed when VERSION is newer than PACKAGE's in COMPONENT.
-follow_debian() {
-    local repo=$1 component=$2 package=$3 run='' version='' id named served
-    listing "$api/repos/bande-linux/$repo/actions/artifacts?per_page=100" "$work/$repo.json" '{"artifacts": []}' \
-        "the $repo's artifacts"
-    while read -r id named; do
-        call "$api/repos/bande-linux/$repo/actions/runs/$id" > "$work/run.json" || fail "cannot read $repo run $id"
-        jq -e '.path == ".github/workflows/follow-debian.yml" and .head_branch == "main" and .conclusion == "success"
-            and (.event == "schedule" or .event == "workflow_dispatch")' "$work/run.json" > /dev/null || continue
-        run=$id version=$named
-        break
-    done < <(jq -r '.artifacts[] | select((.name | startswith("bande-version-")) and (.expired | not))
-        | "\(.workflow_run.id) \(.name | ltrimstr("bande-version-"))"' "$work/$repo.json" | head -20)
-    if [ -z "$run" ]; then
-        echo "find-runs: the $repo has no green follow-debian run that built a package" >&2
-        return 0
-    fi
-    served=$(live_version "$component" arm64 "$package")
-    if newer "$version" "$served"; then
-        echo "$repo $run"
+listing "$api/repos/bande-linux/desktop/actions/artifacts?per_page=100" "$work/artifacts.json" '{"artifacts": []}' \
+    "the desktop's artifacts"
+browser_run='' browser_version=''
+while read -r id named; do
+    call "$api/repos/bande-linux/desktop/actions/runs/$id" > "$work/run.json" || fail "cannot read desktop run $id"
+    jq -e '.path == ".github/workflows/browser-follow-debian.yml" and .head_branch == "main" and .conclusion == "success"
+        and (.event == "push" or .event == "schedule" or .event == "workflow_dispatch")' "$work/run.json" > /dev/null || continue
+    browser_run=$id browser_version=$named
+    break
+done < <(jq -r '.artifacts[] | select((.name | startswith("bande-version-")) and (.expired | not))
+    | "\(.workflow_run.id) \(.name | ltrimstr("bande-version-"))"' "$work/artifacts.json" | head -20)
+if [ -n "$browser_run" ]; then
+    served=$(live_version main arm64 bande-browser)
+    if newer "$browser_version" "$served"; then
+        echo "browser $browser_run"
     else
-        echo "find-runs: $repo $version (run $run) is published" >&2
+        echo "find-runs: browser $browser_version (run $browser_run) is published" >&2
     fi
-}
-follow_debian web main bande-browser
+else
+    echo "find-runs: the desktop has no green browser run that built a package" >&2
+fi
 
 : > "$work/processed"
 if [ -n "$live_suites" ]; then

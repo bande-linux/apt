@@ -19,7 +19,7 @@ Each suite has one component, `main`, and the suites share one pool:
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
 | `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*` (the desktop and every Bande app), `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
-| `main` | amd64, arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/web` that built the browser | `bande-browser`, `bande-browser-l10n-*` |
+| `main` | amd64, arm64, all | green `browser-follow-debian.yml` runs (push, schedule or dispatch) on `main` of `bande-linux/desktop` that built the browser from `browser/` | `bande-browser`, `bande-browser-l10n-*`, `bande-firefox-esr-settings` |
 | `main` | all | green `l10n.yml` runs of `l10n-YYYYMMDD[.N]` tag pushes of `bande-linux/desktop`, the tagged commit on `main`: translation-only builds | `bande-desktop-l10n-*`, at `<release>+l10nYYYYMMDD[.N]` |
 | `main` | all | green `dict.yml` runs of `dict-YYYYMMDD` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-dict-*`, Dictionary's packs |
 
@@ -36,7 +36,7 @@ backports carry `~bpoNN+N`:
 | desktop `vX.Y.Z` | `X.Y.Z~deb14` |
 | `l10n-YYYYMMDD[.N]` packs | `X.Y.Z~deb14+l10nYYYYMMDD[.N]`, X.Y.Z the release they translate |
 | dict `dict-YYYYMMDD` | `YYYYMMDD~deb14` |
-| web (`bande-version-BASE`) | `BASE~deb14`, BASE `<debian-version>+bandeN` |
+| browser (`bande-version-BASE`) | `BASE~deb14`, BASE `<debian-version>+bandeN` |
 | `bande-apt-source` | `1.N~deb14`, one per suite |
 | `bande-archive-keyring` | `1.N`, the same file for every suite |
 
@@ -72,8 +72,8 @@ repository may publish them, so the archive depends on none of them.
 - The same commit builds byte-identical packages. Every publish adds them to `main`, for every
   architecture; one already published at its version is kept.
 
-Each package name belongs to one source: `apt`, `desktop` (its language packs included), `dict`
-or `web`. The site keeps the owners in `state/owners`, and a publish refuses a name another
+Each package name belongs to one source: `apt`, `browser`, `desktop` (its language packs included)
+or `dict`. The site keeps the owners in `state/owners`, and a publish refuses a name another
 source already publishes. A name whose owner is not one of these sources is free: a source that
 publishes it takes it, and otherwise it leaves the archive, as Debian drops the binaries a source
 no longer builds.
@@ -98,7 +98,7 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
      `bande-desktop` in `main`;
    - dict: the green `dict.yml` push of the desktop's highest `dict-YYYYMMDD` tag, against the
      version of `bande-dict-en` in `main`;
-   - web: the newest green `follow-debian.yml` run on `main` of `bande-linux/web` that uploaded
+   - browser: the newest green `browser-follow-debian.yml` run on `main` of the desktop that uploaded
      a `bande-version-VERSION` artifact (runs that found nothing new upload none), against the
      version of `bande-browser` in `main`;
    - l10n: the green `l10n.yml` push of the desktop's highest `l10n-YYYYMMDD[.N]` tag, unless
@@ -124,7 +124,7 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
      by hand it waits for the run to finish);
    - a desktop run must be the `push` of a `vX.Y.Z` tag that points at the run's commit; a
      desktop push to `main` is refused;
-   - a web run must be a `schedule` or `workflow_dispatch` run on `main`;
+   - a browser run must be a `push`, `schedule` or `workflow_dispatch` run on `main`;
    - a dict run must be the desktop's `dict.yml` `push` of a `dict-YYYYMMDD` tag that points
      at the run's commit; it carries `bande-dict-*` alone, at `YYYYMMDD`, in `all`;
    - an l10n run must be the desktop's `l10n.yml` `push` of an `l10n-YYYYMMDD[.N]` tag that
@@ -133,13 +133,13 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    - its commit must be on `main`.
 
    It then downloads, for each suite, the `bande-debs-<suite>-<arch>` artifacts into
-   `<dir>/<suite>/`. The desktop uploads `amd64`, `arm64` and `all`, web `amd64`, `arm64` and
-   `all` (the language packs), dict and l10n `all`. It refuses:
+   `<dir>/<suite>/`. The desktop uploads `amd64`, `arm64` and `all`, the browser `amd64`, `arm64` and
+   `all` (the language packs and the settings package), dict and l10n `all`. It refuses:
    - package names outside the repository's list, and the repository packages;
    - a package filed under another architecture's artifact;
    - versions other than the run's plus the suite's suffix (see [Suites and
      versions](#suites-and-versions)): the tag's `X.Y.Z~debNN` for the desktop, so
-     test builds' `+git` versions are refused, and for web the version its one
+     test builds' `+git` versions are refused, and for the browser the version its one
      `bande-version-VERSION` artifact names, of the form `<debian-version>+bandeN`;
    - an incomplete architecture: one that lacks a package another architecture carries in that
      suite.
@@ -151,7 +151,7 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    stanza:
    - its input is the live site, whose `InRelease` signatures, `Packages` and pool checksums are
      all verified, plus the new packages, from `DIR/<suite>/`: `--add desktop:main=DIR` for
-     a desktop build, `--add web:main=DIR` for the browser, `--add-each apt:main=DIR` for
+     a desktop build, `--add browser:main=DIR` for the browser, `--add-each apt:main=DIR` for
      the repository packages;
    - a suite, component or architecture that the live site does not serve yet starts empty; a
      component the live site serves but `conf/distribution.in` no longer lists is dropped, with
@@ -166,7 +166,7 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
      other addition, a pack at `<release>+l10n<stamp>` goes in only while the package it
      `Enhances` is at `<release>`: one built on an older release, or on one not published, is
      skipped, so a translation-only build never replaces a newer release's packs;
-   - it refuses a source other than `apt`, `desktop`, `dict` and `web`, and a name that
+   - it refuses a source other than `apt`, `browser`, `desktop` and `dict`, and a name that
      `state/owners` gives to another of them; a name `state/owners` gives to any other source
      goes to the source that publishes it now, or leaves the archive;
    - reprepro builds the pool and the `Packages` indexes; `apt-ftparchive release` writes each
@@ -218,7 +218,7 @@ own. For up to ten minutes after a publish it can serve a new `InRelease` beside
 
 ## Workflow
 
-- **Access:** `github.token` with `actions: read` and `contents: read`; `desktop` and `web` are
+- **Access:** `github.token` with `actions: read` and `contents: read`; `desktop` is
   public, so no other token or GitHub App is involved.
 - **Signing:** the signing subkey is a secret of the `apt-publish` environment, which only `main`
   can use.

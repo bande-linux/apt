@@ -10,8 +10,8 @@ export GH_TOKEN=test FETCH_RUN_POLL=1
 # Run 7 of a source repository, served as the GitHub API. Settings, all
 # optional: event, ref, status, conclusion, compare, workflow, tagged (the
 # commit tag v0.1.0 points at; v0.1.1 is annotated and points at the run's
-# commit), named (web's bande-version-NAMED artifact; empty: none). The run is
-# the push of v0.1.0 for the desktop and a schedule on main for web. Packages
+# commit), named (the browser's bande-version-NAMED artifact; empty: none). The run is
+# the push of v0.1.0 for the desktop and a schedule on main for the browser. Packages
 # are made with the functions below into $d/art/SUITE-ARCH, one artifact
 # bande-debs-SUITE-ARCH per directory, at the version plus the suite's suffix.
 x='~deb14'
@@ -23,18 +23,19 @@ desktop_debs() {
     done
     make_deb "$d/art/$suite-all" bande-desktop "$version" all
 }
-web_version=153.6.0esr-1+bande1
-web_debs() {
-    local d=$1 version=${2:-$web_version$x} arch
+browser_version=153.6.0esr-1+bande1
+browser_debs() {
+    local d=$1 version=${2:-$browser_version$x} arch
     for arch in amd64 arm64; do make_deb "$d/art/forky-$arch" bande-browser "$version" $arch; done
     make_deb "$d/art/forky-all" bande-browser-l10n-sv-se "$version" all
+    make_deb "$d/art/forky-all" bande-firefox-esr-settings "$version" all
 }
 api() {
-    local d=$1 repo=bande-linux/$2 base id=20 arch workflow=${workflow:-} event=${event:-} ref=${ref:-}
+    local d=$1 repo=bande-linux/desktop base id=20 arch workflow=${workflow:-} event=${event:-} ref=${ref:-}
     base=$d/repos/$repo
     case $2 in
         desktop) : "${workflow:=release.yml}" "${event:=push}" "${ref:=v0.1.0}" ;;
-        *) : "${workflow:=follow-debian.yml}" "${event:=schedule}" "${ref:=main}" ;;
+        browser) : "${workflow:=browser-follow-debian.yml}" "${event:=schedule}" "${ref:=main}" ;;
     esac
     mkdir -p "$base/actions/runs/7" "$base/actions/artifacts" "$base/compare" "$base/git/ref/tags" "$base/git/tags"
     jq -n --arg s "${tagged:-$sha}" '{object: {type: "commit", sha: $s}}' > "$base/git/ref/tags/v0.1.0"
@@ -59,8 +60,8 @@ api() {
         jq --arg n "bande-debs-$(basename "$arch")" --argjson i "$id" '.artifacts += [{id: $i, name: $n}]' \
             "$base/actions/runs/7/artifacts" > "$d/artifacts" && mv "$d/artifacts" "$base/actions/runs/7/artifacts"
     done
-    if [ "$2" = web ] && [ -n "${named-$web_version}" ]; then
-        jq --arg n "bande-version-${named-$web_version}" '.artifacts += [{id: 99, name: $n}]' \
+    if [ "$2" = browser ] && [ -n "${named-$browser_version}" ]; then
+        jq --arg n "bande-version-${named-$browser_version}" '.artifacts += [{id: 99, name: $n}]' \
             "$base/actions/runs/7/artifacts" > "$d/artifacts" && mv "$d/artifacts" "$base/actions/runs/7/artifacts"
     fi
     export GITHUB_API_URL
@@ -111,10 +112,12 @@ refuses "a malformed language pack tag is refused" "publish l10n-YYYYMMDD tags" 
 d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108; ref=l10n-20261108 api "$d" desktop
 refuses "a language pack tag from the release workflow is refused" "not .github/workflows/l10n.yml" fetch l10n "$d/out"
 
-d=$(case_dir); web_debs "$d"; api "$d" web
-check "a green web run feeds main with the browser and its language packs" sh -c "'$root/scripts/fetch-run.sh' web 7 '$d/out' | grep -qx component=main && test -e '$d/out/forky/bande-browser_${web_version}${x}_arm64.deb' -a -e '$d/out/forky/bande-browser-l10n-sv-se_${web_version}${x}_all.deb'"
-d=$(case_dir); web_debs "$d"; event=workflow_dispatch api "$d" web
-check "a dispatched web run is taken" fetch web "$d/out"
+d=$(case_dir); browser_debs "$d"; api "$d" browser
+check "a green browser run feeds main with the browser, its language packs and the settings package" sh -c "'$root/scripts/fetch-run.sh' browser 7 '$d/out' | grep -qx component=main && test -e '$d/out/forky/bande-browser_${browser_version}${x}_arm64.deb' -a -e '$d/out/forky/bande-browser-l10n-sv-se_${browser_version}${x}_all.deb' -a -e '$d/out/forky/bande-firefox-esr-settings_${browser_version}${x}_all.deb'"
+d=$(case_dir); browser_debs "$d"; event=workflow_dispatch api "$d" browser
+check "a dispatched browser run is taken" fetch browser "$d/out"
+d=$(case_dir); browser_debs "$d"; event=push api "$d" browser
+check "a browser push to main is taken" fetch browser "$d/out"
 d=$(case_dir); desktop_debs "$d" 0.1.1$x; ref=v0.1.1 api "$d" desktop
 check "an annotated tag is followed to its commit" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=refs/tags/v0.1.0 api "$d" desktop
@@ -129,8 +132,8 @@ d=$(case_dir); desktop_debs "$d"; api "$d" desktop
 refuses "an unknown repository is refused" "unknown repository" fetch nonexistent "$d/out"
 d=$(case_dir); desktop_debs "$d"; workflow=ci.yml api "$d" desktop
 refuses "another workflow is refused" "not .github/workflows/release.yml" fetch desktop "$d/out"
-d=$(case_dir); for a in amd64 arm64; do make_deb "$d/art/forky-$a" bande-compositor "$web_version$x" $a; done; api "$d" web
-refuses "the desktop's packages are refused from web" "web does not publish" fetch web "$d/out"
+d=$(case_dir); for a in amd64 arm64; do make_deb "$d/art/forky-$a" bande-compositor "$browser_version$x" $a; done; api "$d" browser
+refuses "the desktop's packages are refused from the browser" "browser does not publish" fetch browser "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=main api "$d" desktop
 refuses "a desktop push to main is refused" "publishes vX.Y.Z tags" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=v0.1 api "$d" desktop
@@ -141,12 +144,10 @@ d=$(case_dir); desktop_debs "$d"; tagged=$other api "$d" desktop
 refuses "a tag on another commit is refused" "points at $other" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; event=workflow_dispatch api "$d" desktop
 refuses "a dispatched desktop run is refused" "started by workflow_dispatch" fetch desktop "$d/out"
-d=$(case_dir); web_debs "$d"; ref=feature api "$d" web
-refuses "a web branch run is refused" "the web publishes main" fetch web "$d/out"
-d=$(case_dir); web_debs "$d"; event=push api "$d" web
-refuses "a web push run is refused" "started by push" fetch web "$d/out"
-d=$(case_dir); web_debs "$d"; event=pull_request api "$d" web
-refuses "a pull request run is refused" "started by pull_request" fetch web "$d/out"
+d=$(case_dir); browser_debs "$d"; ref=feature api "$d" browser
+refuses "a browser branch run is refused" "the browser publishes main" fetch browser "$d/out"
+d=$(case_dir); browser_debs "$d"; event=pull_request api "$d" browser
+refuses "a pull request run is refused" "started by pull_request" fetch browser "$d/out"
 d=$(case_dir); desktop_debs "$d"; conclusion=failure api "$d" desktop
 refuses "a failed run is refused" "ended in failure" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; status=in_progress api "$d" desktop
@@ -158,12 +159,12 @@ d=$(case_dir); desktop_debs "$d" 0.1.1$x; api "$d" desktop
 refuses "packages of another version than the tag are refused" "carries version 0.1.1" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d" 0.1.0+git20261029.35.788731f; api "$d" desktop
 refuses "a main build's version under a tag is refused" "carries version" fetch desktop "$d/out"
-d=$(case_dir); web_debs "$d" 153.6.0esr-1~deb14; named=153.6.0esr-1 api "$d" web
-refuses "a browser without the +bande suffix is refused" "not <debian-version>+bandeN" fetch web "$d/out"
-d=$(case_dir); web_debs "$d" 153.6.0esr-1+bande2~deb14; api "$d" web
-refuses "browser packages of another version than named are refused" "the run publishes $web_version~deb14" fetch web "$d/out"
-d=$(case_dir); web_debs "$d"; named='' api "$d" web
-refuses "a web run without its version artifact is refused" "names 0 versions" fetch web "$d/out"
+d=$(case_dir); browser_debs "$d" 153.6.0esr-1~deb14; named=153.6.0esr-1 api "$d" browser
+refuses "a browser without the +bande suffix is refused" "not <debian-version>+bandeN" fetch browser "$d/out"
+d=$(case_dir); browser_debs "$d" 153.6.0esr-1+bande2~deb14; api "$d" browser
+refuses "browser packages of another version than named are refused" "the run publishes $browser_version~deb14" fetch browser "$d/out"
+d=$(case_dir); browser_debs "$d"; named='' api "$d" browser
+refuses "a browser run without its version artifact is refused" "names 0 versions" fetch browser "$d/out"
 d=$(case_dir); desktop_debs "$d"; make_deb "$d/art/forky-arm64" libc6 9.9 arm64; api "$d" desktop
 refuses "a package outside the archive's names is refused" "desktop does not publish" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; rm -r "$d/art/forky-amd64"; api "$d" desktop
@@ -182,8 +183,8 @@ d=$(case_dir); desktop_debs "$d" "$desktop_version~deb14+1"; api "$d" desktop
 refuses "a stamp after the suffix is refused" "carries version 0.1.0~deb14+1" fetch desktop "$d/out"
 d=$(case_dir); make_deb "$d/art/forky-all" bande-dict-en 20261108 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
 refuses "dictionary packs without the suffix are refused" "the run publishes 20261108~deb14" fetch dict "$d/out"
-d=$(case_dir); for a in amd64 arm64; do make_deb "$d/art/forky-$a" bande-browser "$web_version" $a; done; api "$d" web
-refuses "a browser at its bare base version is refused" "the run publishes $web_version~deb14" fetch web "$d/out"
+d=$(case_dir); for a in amd64 arm64; do make_deb "$d/art/forky-$a" bande-browser "$browser_version" $a; done; api "$d" browser
+refuses "a browser at its bare base version is refused" "the run publishes $browser_version~deb14" fetch browser "$d/out"
 d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108~deb14; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
 refuses "packs with the suffix after the stamp are refused" "not RELEASE~deb14+l10n20261108" fetch l10n "$d/out"
 d=$(case_dir); make_deb "$d/art/amd64" bande-compositor "$desktop_version" amd64; api "$d" desktop

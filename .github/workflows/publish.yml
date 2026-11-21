@@ -65,7 +65,7 @@ jobs:
               continue
             fi
             source=$repo
-            case $source in dict | l10n) source=desktop ;; esac
+            case $source in browser | dict | l10n) source=desktop ;; esac
             ref=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/bande-linux/$source/actions/runs/$id" | jq -r '.head_branch // "?"') || ref='?'
             echo "- $repo $ref (run $id)" >> "$GITHUB_STEP_SUMMARY"
           done < runs
