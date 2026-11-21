@@ -332,6 +332,13 @@ check "packs at RELEASE~debNN+l10nSTAMP go in beside their release" "$root/scrip
     --live "$(serve "$scratch/two-forky")" --add-l10n desktop:main="$scratch/in-s4" --out "$scratch/two-l10n"
 check "in their suite" both "$scratch/two-l10n" main bande-desktop-l10n-sv=0.1.0~deb14+l10n20261111
 check "and not in another" lacks "$scratch/two-l10n" main arm64 bande-desktop-l10n-sv=0.1.0~deb14+l10n20261111 duke
+for a in amd64 arm64; do in_suite s6 forky bande-compositor 0.2.0-1~deb14 $a; done
+in_suite s6 forky bande-desktop 0.2.0-1~deb14 all
+for p in sv en-gb; do enhances=bande-desktop in_suite s7 forky "bande-desktop-l10n-$p" 0.2.0-1~deb14+l10n20261112 all; done
+check "a Debian revision X.Y.Z-R~debNN replaces the release before it" "$root/scripts/rebuild.sh" --conf "$two" \
+    --live "$(serve "$scratch/two-l10n")" --add desktop:main="$scratch/in-s6" --add-l10n desktop:main="$scratch/in-s7" \
+    --out "$scratch/two-revision"
+check "with packs built on that revision" both "$scratch/two-revision" main bande-desktop-l10n-sv=0.2.0-1~deb14+l10n20261112
 for a in amd64 arm64; do in_suite s5 forky bande-compositor 0.0.0+git20261030.4.bbbbbb4~deb14 $a; done
 refuses "the suffix sorts below the unsuffixed version" "is older than" "$root/scripts/rebuild.sh" --conf "$two" \
     --live "$(serve "$scratch/two")" --add desktop:main="$scratch/in-s5" --out "$scratch/two-older"

@@ -67,11 +67,12 @@ if [ "$source_repo" != browser ]; then
         [[ $tag =~ ^l10n-([0-9]{8}(\.[0-9]+)?)$ ]] || fail "run $run built $ref; the language packs publish l10n-YYYYMMDD tags"
         stamp=${BASH_REMATCH[1]}
     elif [ "$source_repo" = desktop ]; then
-        [[ $tag =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || fail "run $run built $ref; the desktop publishes vX.Y.Z tags"
-        want_version=${BASH_REMATCH[1]}
+        [[ $tag =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-([0-9]+))?$ ]] ||
+            fail "run $run built $ref; the desktop publishes vX.Y.Z and vX.Y.Z-R tags"
+        want_version=${BASH_REMATCH[1]}-${BASH_REMATCH[3]:-1}
     else
         [[ $tag =~ ^dict-([0-9]{8})$ ]] || fail "run $run built $ref; the dictionary packs publish dict-YYYYMMDD tags"
-        want_version=${BASH_REMATCH[1]}
+        want_version=${BASH_REMATCH[1]}-1
     fi
     call "$api/repos/$repo/git/ref/tags/$tag" > "$work/tag.json" || fail "tag $tag does not exist"
     read -r type object < <(jq -r '[.object.type, .object.sha] | @tsv' "$work/tag.json")
@@ -110,9 +111,10 @@ if [ "$source_repo" = browser ]; then
 fi
 l10n_version() {
     local package=$1 version=$2 number=$3 tag_name status
-    [[ $version =~ ^([0-9]+\.[0-9]+\.[0-9]+)~deb$number\+l10n([0-9.]+)$ ]] && [ "${BASH_REMATCH[2]}" = "$stamp" ] ||
-        fail "$package carries version $version, not RELEASE~deb$number+l10n$stamp"
+    [[ $version =~ ^([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)~deb$number\+l10n([0-9.]+)$ ]] && [ "${BASH_REMATCH[3]}" = "$stamp" ] ||
+        fail "$package carries version $version, not X.Y.Z-R~deb$number+l10n$stamp"
     tag_name=v${BASH_REMATCH[1]}
+    [ "${BASH_REMATCH[2]}" = 1 ] || tag_name+=-${BASH_REMATCH[2]}
     if ! grep -qxF "$tag_name" "$work/released" 2> /dev/null; then
         status=$(call "$api/repos/$repo/compare/$tag_name...$sha" | jq -r .status) ||
             fail "$package is built on $tag_name, which $repo does not have"

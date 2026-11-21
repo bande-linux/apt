@@ -7,17 +7,18 @@
 # - apt: "apt VERSION" when $APT_VERSION, the version of the keyring and source
 #   packages this repository builds, is newer than the live
 #   bande-archive-keyring's in any suite (a new suite has none);
-# - desktop: the green release.yml push of the highest vX.Y.Z tag, whose
-#   version is the tag; the live one is bande-desktop's in main;
+# - desktop: the green release.yml push of the highest vX.Y.Z or vX.Y.Z-R tag,
+#   whose version is X.Y.Z-R (R is 1 for vX.Y.Z); the live one is
+#   bande-desktop's in main;
 # - dict: the green dict.yml push of the desktop's highest dict-YYYYMMDD tag,
-#   whose version is the date; the live one is bande-dict-en's in main;
+#   whose version is YYYYMMDD-1; the live one is bande-dict-en's in main;
 # - browser: the newest green browser-follow-debian.yml run on main of the
 #   desktop with a bande-version-VERSION artifact; the live one is
 #   bande-browser's in main;
 # - l10n: the green l10n.yml push of the desktop's highest l10n-YYYYMMDD[.N]
 #   tag, translation-only language packs, unless the live state/processed, which
 #   holds the runs already taken or refused, lists the run. It waits while a
-#   vX.Y.Z tag on the run's history is newer than what the archive serves or
+#   release tag on the run's history is newer than what the archive serves or
 #   this publish takes, since its packs are built on that release (rebuild.sh
 #   --add-l10n).
 # - resign: "resign VALID_UNTIL" when a suite's live InRelease has fewer than 7
@@ -133,6 +134,13 @@ live_version() {
 
 newer() { [ -z "$2" ] || dpkg --compare-versions "$1" gt "$2"; }
 
+# release_version TAG: the Debian version a desktop release tag builds,
+# X.Y.Z-R for vX.Y.Z-R and X.Y.Z-1 for vX.Y.Z; false for any other tag.
+release_version() {
+    [[ $1 =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-([0-9]+))?$ ]] || return 1
+    echo "${BASH_REMATCH[1]}-${BASH_REMATCH[3]:-1}"
+}
+
 if [ -n "${APT_VERSION:-}" ]; then
     behind=''
     for suite in $suites; do
@@ -149,9 +157,9 @@ listing "$api/repos/bande-linux/desktop/actions/workflows/release.yml/runs?event
     "$work/desktop.json" '{"workflow_runs": []}' "the desktop's release runs"
 desktop_run='' desktop_version='' desktop_next=''
 while read -r id ref; do
-    [[ ${ref#refs/tags/} =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || continue
-    if [ -z "$desktop_version" ] || dpkg --compare-versions "${BASH_REMATCH[1]}" gt "$desktop_version"; then
-        desktop_run=$id desktop_version=${BASH_REMATCH[1]}
+    version=$(release_version "${ref#refs/tags/}") || continue
+    if [ -z "$desktop_version" ] || dpkg --compare-versions "$version" gt "$desktop_version"; then
+        desktop_run=$id desktop_version=$version
     fi
 done < <(jq -r '.workflow_runs[] | select(.event == "push" and .conclusion == "success") | "\(.id) \(.head_branch)"' \
     "$work/desktop.json")
@@ -165,7 +173,7 @@ if [ -n "$desktop_run" ]; then
         echo "find-runs: desktop $desktop_version (run $desktop_run) is published" >&2
     fi
 else
-    echo "find-runs: the desktop has no green vX.Y.Z release run" >&2
+    echo "find-runs: the desktop has no green vX.Y.Z[-R] release run" >&2
 fi
 
 listing "$api/repos/bande-linux/desktop/actions/workflows/dict.yml/runs?event=push&status=success&per_page=100" \
@@ -173,8 +181,8 @@ listing "$api/repos/bande-linux/desktop/actions/workflows/dict.yml/runs?event=pu
 dict_run='' dict_version=''
 while read -r id ref; do
     [[ ${ref#refs/tags/} =~ ^dict-([0-9]{8})$ ]] || continue
-    if [ -z "$dict_version" ] || dpkg --compare-versions "${BASH_REMATCH[1]}" gt "$dict_version"; then
-        dict_run=$id dict_version=${BASH_REMATCH[1]}
+    if [ -z "$dict_version" ] || dpkg --compare-versions "${BASH_REMATCH[1]}-1" gt "$dict_version"; then
+        dict_run=$id dict_version=${BASH_REMATCH[1]}-1
     fi
 done < <(jq -r '.workflow_runs[] | select(.event == "push" and .conclusion == "success") | "\(.id) \(.head_branch)"' \
     "$work/dict.json")
@@ -221,15 +229,15 @@ if [ -n "$live_suites" ]; then
         *) fail "$live/state/processed answered HTTP $code" ;;
     esac
 fi
-# release_waits SHA NEXT: true, naming it, when the desktop's highest vX.Y.Z
+# release_waits SHA NEXT: true, naming it, when the desktop's highest release
 # tag is newer than NEXT, the version the archive will serve, and is on the
 # history of SHA.
 release_waits() {
-    local sha=$1 next=$2 tag='' version='' name status
+    local sha=$1 next=$2 tag='' version='' name built status
     while read -r name; do
-        [[ $name =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || continue
-        if [ -z "$version" ] || dpkg --compare-versions "${BASH_REMATCH[1]}" gt "$version"; then
-            tag=$name version=${BASH_REMATCH[1]}
+        built=$(release_version "$name") || continue
+        if [ -z "$version" ] || dpkg --compare-versions "$built" gt "$version"; then
+            tag=$name version=$built
         fi
     done < <(jq -r '.[].ref | ltrimstr("refs/tags/")' "$work/tags.json")
     [ -n "$tag" ] && newer "$version" "$next" || return 1

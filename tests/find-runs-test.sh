@@ -6,9 +6,9 @@ conf=$scratch/conf
 make_conf "$conf"
 export GH_TOKEN=test
 
-# A live archive serving desktop 0.1.0, browser 153.6.0esr-1+bande1 and
+# A live archive serving desktop 0.1.0-1, browser 153.6.0esr-1+bande1 and
 # repository packages 1.0.
-for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop/forky" $p 0.1.0 all; done
+for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop/forky" $p 0.1.0-1 all; done
 for a in amd64 arm64; do make_deb "$scratch/browser/forky" bande-browser 153.6.0esr-1+bande1 $a; done
 REPOSITORY_VERSION=1.0 "$root/scripts/build-repository-packages.sh" "$scratch/apt" > /dev/null
 empty=$(mktemp -d -p "$scratch")
@@ -72,7 +72,7 @@ find_runs() { "$root/scripts/find-runs.sh" "${2:-$live}" "$conf" > "$1"; }
 d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" browser_runs="40:153.6.0esr-1+bande1:success" api "$d"
 check "nothing new finds nothing" find_runs "$d/out"
 check "it prints no run" test ! -s "$d/out"
-check "it says what is published" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'desktop 0.1.0 (run 30) is published'"
+check "it says what is published" sh -c "'$root/scripts/find-runs.sh' '$live' '$conf' 2>&1 | grep -q 'desktop 0.1.0-1 (run 30) is published'"
 
 d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success 30:v0.1.0:success" browser_runs="40:153.6.0esr-1+bande1:success" api "$d"
 check "a new desktop tag is found" find_runs "$d/out"
@@ -97,6 +97,10 @@ check "nothing is printed for those" test ! -s "$d/out"
 d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success 35:v0.0.9:success" api "$d"
 check "an older tag is not published again" find_runs "$d/out"
 check "the highest tag decides" test ! -s "$d/out"
+
+d=$(mktemp -d -p "$scratch"); desktop_runs="36:v0.1.0-2:success 30:v0.1.0:success" api "$d"
+check "a packaging revision of the served release is found" find_runs "$d/out"
+check "it is printed" diff <(echo "desktop 36") "$d/out"
 
 d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" browser_runs="40:153.6.0esr-1+bande1:success" api "$d"
 check "an empty site takes every release" find_runs "$d/out" "$(serve "$empty")"
@@ -162,7 +166,7 @@ check "new repository packages are found" sh -c "APT_VERSION=1.1 '$root/scripts/
 check "published repository packages are not" sh -c "APT_VERSION=1.0 '$root/scripts/find-runs.sh' '$live' '$conf' > '$d/out' && test ! -s '$d/out'"
 check "an empty site takes the repository packages" sh -c "APT_VERSION=1.0 '$root/scripts/find-runs.sh' '$(serve "$empty")' '$conf' | grep -qx 'apt 1.0'"
 
-for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop-2/forky" $p 0.2.0 all; done
+for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop-2/forky" $p 0.2.0-1 all; done
 "$root/scripts/rebuild.sh" --conf "$conf" --live "$live" --add desktop:main="$scratch/desktop-2" --out "$scratch/site-2" > /dev/null
 stale=$(mktemp -d -p "$scratch")
 cp -r "$scratch/site-2/." "$stale/"
@@ -197,7 +201,7 @@ cp -r "$conf" "$two" && printf 'forky\nduke\n' > "$two/suites"
 d=$(mktemp -d -p "$scratch"); desktop_runs="30:v0.1.0:success" api "$d"
 check "a suite not served yet wants the repository packages" sh -c "APT_VERSION=1.0 '$root/scripts/find-runs.sh' '$live' '$two' > '$d/out'"
 check "and only them, as the other suite has the desktop" diff <(echo "apt 1.0") "$d/out"
-for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop-3/forky" $p 0.2.0~deb14 all; done
+for p in bande-desktop bande-compositor; do make_deb "$scratch/desktop-3/forky" $p 0.2.0-1~deb14 all; done
 "$root/scripts/rebuild.sh" --conf "$two" --live "$live" --add desktop:main="$scratch/desktop-3" --out "$scratch/site-3" > /dev/null
 d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" api "$d"
 check "a tag served with the suite suffix is published" sh -c "'$root/scripts/find-runs.sh' '$(serve "$scratch/site-3")' '$two' > '$d/out'"

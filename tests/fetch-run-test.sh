@@ -4,7 +4,7 @@
 
 sha=788731fba292303f508c4dddda080bafd65aba29
 other=1111111111111111111111111111111111111111
-desktop_version=0.1.0
+desktop_version=0.1.0-1
 export GH_TOKEN=test FETCH_RUN_POLL=1
 
 # Run 7 of a source repository, served as the GitHub API. Settings, all
@@ -43,7 +43,7 @@ api() {
     for tag in ${released-v0.1.0}; do
         jq -n --arg s "${history:-ahead}" '{status: $s}' > "$base/compare/$tag...$sha"
     done
-    if [[ ${ref#refs/tags/} = dict-* || ${ref#refs/tags/} = l10n-* ]]; then
+    if [[ ${ref#refs/tags/} = dict-* || ${ref#refs/tags/} = l10n-* || ${ref#refs/tags/} = v*-* ]]; then
         jq -n --arg s "${tagged:-$sha}" '{object: {type: "commit", sha: $s}}' > "$base/git/ref/tags/${ref#refs/tags/}"
     fi
     jq -n --arg s "$sha" '{object: {type: "commit", sha: $s}}' > "$base/git/tags/abcd"
@@ -76,40 +76,46 @@ check "a green desktop tag run feeds main" sh -c "'$root/scripts/fetch-run.sh' d
 check "it brings both architectures" test -e "$d/out/forky/bande-compositor_${desktop_version}${x}_amd64.deb" -a \
     -e "$d/out/forky/bande-compositor_${desktop_version}${x}_arm64.deb"
 check "it brings the architecture-independent packages" test -e "$d/out/forky/bande-desktop_${desktop_version}${x}_all.deb"
+d=$(case_dir); desktop_debs "$d" 0.1.0-2$x; ref=v0.1.0-2 api "$d" desktop
+check "a packaging revision tag vX.Y.Z-R publishes X.Y.Z-R" fetch desktop "$d/out"
+check "it brings that revision" test -e "$d/out/forky/bande-compositor_0.1.0-2${x}_arm64.deb"
+d=$(case_dir); make_deb "$d/art/forky-all" bande-desktop-l10n-sv 0.1.0-2~deb14+l10n20261108 all
+released=v0.1.0-2 workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+check "packs built on a packaging revision name its tag" fetch l10n "$d/out"
 d=$(case_dir); desktop_debs "$d"; make_deb "$d/art/forky-all" bande-archive-keyring 1.0 all; api "$d" desktop
 refuses "the desktop may not publish the keyring" "bande-archive-keyring is built by apt itself" fetch desktop "$d/out"
-d=$(case_dir); make_deb "$d/art/forky-all" bande-dict-en 20261108~deb14 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
+d=$(case_dir); make_deb "$d/art/forky-all" bande-dict-en 20261108-1~deb14 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
 check "a green dictionary run feeds main" sh -c "'$root/scripts/fetch-run.sh' dict 7 '$d/out' | grep -qx component=main"
-check "it brings the packs" test -e "$d/out/forky/bande-dict-en_20261108~deb14_all.deb"
+check "it brings the packs" test -e "$d/out/forky/bande-dict-en_20261108-1~deb14_all.deb"
 d=$(case_dir); make_deb "$d/art/forky-all" bande-desktop 20261108 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
 refuses "a dictionary run may publish only packs" "dict does not publish" fetch dict "$d/out"
-d=$(case_dir); make_deb "$d/art/forky-all" bande-dict-en 20261108~deb14 all; ref=dict-20261108 api "$d" desktop
+d=$(case_dir); make_deb "$d/art/forky-all" bande-dict-en 20261108-1~deb14 all; ref=dict-20261108 api "$d" desktop
 refuses "a dictionary tag from the release workflow is refused" "not .github/workflows/dict.yml" fetch dict "$d/out"
 l10n_debs() {
     local d=$1 package=$2 version=$3
     make_deb "$d/art/forky-all" "$package-l10n-sv" "$version" all
     make_deb "$d/art/forky-all" "$package-l10n-en-gb" "$version" all
 }
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0-1~deb14+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
 check "a green language pack run of the desktop feeds main" sh -c "'$root/scripts/fetch-run.sh' l10n 7 '$d/out' | grep -qx component=main"
-check "it brings the packs" test -e "$d/out/forky/bande-desktop-l10n-sv_0.1.0~deb14+l10n20261108_all.deb" -a \
-    -e "$d/out/forky/bande-desktop-l10n-en-gb_0.1.0~deb14+l10n20261108_all.deb"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108.2; workflow=l10n.yml ref=l10n-20261108.2 api "$d" desktop
+check "it brings the packs" test -e "$d/out/forky/bande-desktop-l10n-sv_0.1.0-1~deb14+l10n20261108_all.deb" -a \
+    -e "$d/out/forky/bande-desktop-l10n-en-gb_0.1.0-1~deb14+l10n20261108_all.deb"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0-1~deb14+l10n20261108.2; workflow=l10n.yml ref=l10n-20261108.2 api "$d" desktop
 check "a second language pack tag of a day is taken" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261107; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
-refuses "packs of another date than the tag are refused" "not RELEASE~deb14+l10n20261108" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0-1~deb14+l10n20261107; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+refuses "packs of another date than the tag are refused" "not X.Y.Z-R~deb14+l10n20261108" fetch l10n "$d/out"
 d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
-refuses "packs at a release's version are refused" "not RELEASE~deb14+l10n20261108" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.2.0~deb14+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+refuses "packs at a release's version are refused" "not X.Y.Z-R~deb14+l10n20261108" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.2.0-1~deb14+l10n20261108; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
 refuses "packs on a release the desktop does not have are refused" "built on v0.2.0, which" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108; history=behind workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0-1~deb14+l10n20261108; history=behind workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
 refuses "packs on a release off the run's history are refused" "not on the history" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108; make_deb "$d/art/forky-all" bande-desktop 0.1.0~deb14+l10n20261108 all
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0-1~deb14+l10n20261108; make_deb "$d/art/forky-all" bande-desktop 0.1.0-1~deb14+l10n20261108 all
 workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
 refuses "a language pack run may publish only the desktop's packs" "l10n does not publish" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108; workflow=l10n.yml ref=l10n-2026 api "$d" desktop
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0-1~deb14+l10n20261108; workflow=l10n.yml ref=l10n-2026 api "$d" desktop
 refuses "a malformed language pack tag is refused" "publish l10n-YYYYMMDD tags" fetch l10n "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0~deb14+l10n20261108; ref=l10n-20261108 api "$d" desktop
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0-1~deb14+l10n20261108; ref=l10n-20261108 api "$d" desktop
 refuses "a language pack tag from the release workflow is refused" "not .github/workflows/l10n.yml" fetch l10n "$d/out"
 
 d=$(case_dir); browser_debs "$d"; api "$d" browser
@@ -118,7 +124,7 @@ d=$(case_dir); browser_debs "$d"; event=workflow_dispatch api "$d" browser
 check "a dispatched browser run is taken" fetch browser "$d/out"
 d=$(case_dir); browser_debs "$d"; event=push api "$d" browser
 check "a browser push to main is taken" fetch browser "$d/out"
-d=$(case_dir); desktop_debs "$d" 0.1.1$x; ref=v0.1.1 api "$d" desktop
+d=$(case_dir); desktop_debs "$d" 0.1.1-1$x; ref=v0.1.1 api "$d" desktop
 check "an annotated tag is followed to its commit" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=refs/tags/v0.1.0 api "$d" desktop
 check "a full tag ref is taken" fetch desktop "$d/out"
@@ -135,9 +141,9 @@ refuses "another workflow is refused" "not .github/workflows/release.yml" fetch 
 d=$(case_dir); for a in amd64 arm64; do make_deb "$d/art/forky-$a" bande-compositor "$browser_version$x" $a; done; api "$d" browser
 refuses "the desktop's packages are refused from the browser" "browser does not publish" fetch browser "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=main api "$d" desktop
-refuses "a desktop push to main is refused" "publishes vX.Y.Z tags" fetch desktop "$d/out"
+refuses "a desktop push to main is refused" "publishes vX.Y.Z and vX.Y.Z-R tags" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=v0.1 api "$d" desktop
-refuses "a tag that is not vX.Y.Z is refused" "publishes vX.Y.Z tags" fetch desktop "$d/out"
+refuses "a tag that is not vX.Y.Z is refused" "publishes vX.Y.Z and vX.Y.Z-R tags" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; ref=v0.2.0 api "$d" desktop
 refuses "a tag that does not exist is refused" "tag v0.2.0 does not exist" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d"; tagged=$other api "$d" desktop
@@ -155,7 +161,7 @@ refuses "a run that does not finish is refused" "still in_progress" env FETCH_RU
     "$root/scripts/fetch-run.sh" desktop 7 "$d/out"
 d=$(case_dir); desktop_debs "$d"; compare=diverged api "$d" desktop
 refuses "a commit off main is refused" "is not on main" fetch desktop "$d/out"
-d=$(case_dir); desktop_debs "$d" 0.1.1$x; api "$d" desktop
+d=$(case_dir); desktop_debs "$d" 0.1.1-1$x; api "$d" desktop
 refuses "packages of another version than the tag are refused" "carries version 0.1.1" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d" 0.1.0+git20261029.35.788731f; api "$d" desktop
 refuses "a main build's version under a tag is refused" "carries version" fetch desktop "$d/out"
@@ -176,17 +182,17 @@ refuses "a package in another architecture's artifact is refused" "bande-debs-fo
     fetch desktop "$d/out"
 
 d=$(case_dir); desktop_debs "$d" "$desktop_version"; api "$d" desktop
-refuses "a desktop package without the suite suffix is refused" "carries version 0.1.0, the run publishes 0.1.0~deb14 for forky" fetch desktop "$d/out"
+refuses "a desktop package without the suite suffix is refused" "carries version 0.1.0-1, the run publishes 0.1.0-1~deb14 for forky" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d" "$desktop_version~deb15"; api "$d" desktop
-refuses "another suite's suffix is refused" "carries version 0.1.0~deb15" fetch desktop "$d/out"
+refuses "another suite's suffix is refused" "carries version 0.1.0-1~deb15" fetch desktop "$d/out"
 d=$(case_dir); desktop_debs "$d" "$desktop_version~deb14+1"; api "$d" desktop
-refuses "a stamp after the suffix is refused" "carries version 0.1.0~deb14+1" fetch desktop "$d/out"
+refuses "a stamp after the suffix is refused" "carries version 0.1.0-1~deb14+1" fetch desktop "$d/out"
 d=$(case_dir); make_deb "$d/art/forky-all" bande-dict-en 20261108 all; workflow=dict.yml ref=dict-20261108 api "$d" desktop
-refuses "dictionary packs without the suffix are refused" "the run publishes 20261108~deb14" fetch dict "$d/out"
+refuses "dictionary packs without the suffix are refused" "the run publishes 20261108-1~deb14" fetch dict "$d/out"
 d=$(case_dir); for a in amd64 arm64; do make_deb "$d/art/forky-$a" bande-browser "$browser_version" $a; done; api "$d" browser
 refuses "a browser at its bare base version is refused" "the run publishes $browser_version~deb14" fetch browser "$d/out"
-d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108~deb14; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
-refuses "packs with the suffix after the stamp are refused" "not RELEASE~deb14+l10n20261108" fetch l10n "$d/out"
+d=$(case_dir); l10n_debs "$d" bande-desktop 0.1.0+l10n20261108-1~deb14; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+refuses "packs with the suffix after the stamp are refused" "not X.Y.Z-R~deb14+l10n20261108" fetch l10n "$d/out"
 d=$(case_dir); make_deb "$d/art/amd64" bande-compositor "$desktop_version" amd64; api "$d" desktop
 refuses "a run with no suite's artifacts is refused" "no bande-debs-SUITE-ARCH artifacts for any suite of conf/suites: forky" fetch desktop "$d/out"
 
@@ -194,20 +200,20 @@ two=$scratch/two-suites
 mkdir -p "$two" && printf 'forky\nduke\n' > "$two/suites"
 d=$(case_dir); desktop_debs "$d"; api "$d" desktop
 check "a run built before a suite was listed is taken" sh -c "'$root/scripts/fetch-run.sh' desktop 7 '$d/out' '$two' 2> '$d/log'"
-check "it feeds the suite it built for" test -e "$d/out/forky/bande-desktop_0.1.0~deb14_all.deb"
+check "it feeds the suite it built for" test -e "$d/out/forky/bande-desktop_0.1.0-1~deb14_all.deb"
 check "and leaves the other alone" test ! -e "$d/out/duke"
 check "saying so" grep -q 'run 7 built nothing for duke; it stays as it is' "$d/log"
-d=$(case_dir); desktop_debs "$d"; desktop_debs "$d" 0.1.0~deb15 duke; api "$d" desktop
+d=$(case_dir); desktop_debs "$d"; desktop_debs "$d" 0.1.0-1~deb15 duke; api "$d" desktop
 check "a run of both suites is taken" "$root/scripts/fetch-run.sh" desktop 7 "$d/out" "$two"
-check "forky gets ~deb14" test -e "$d/out/forky/bande-compositor_0.1.0~deb14_arm64.deb"
-check "duke gets ~deb15" test -e "$d/out/duke/bande-compositor_0.1.0~deb15_arm64.deb" -a ! -e "$d/out/duke/bande-compositor_0.1.0~deb14_arm64.deb"
-d=$(case_dir); desktop_debs "$d"; desktop_debs "$d" 0.1.0~deb14 duke; api "$d" desktop
-refuses "forky's packages under duke's artifacts are refused" "the run publishes 0.1.0~deb15 for duke" \
+check "forky gets ~deb14" test -e "$d/out/forky/bande-compositor_0.1.0-1~deb14_arm64.deb"
+check "duke gets ~deb15" test -e "$d/out/duke/bande-compositor_0.1.0-1~deb15_arm64.deb" -a ! -e "$d/out/duke/bande-compositor_0.1.0-1~deb14_arm64.deb"
+d=$(case_dir); desktop_debs "$d"; desktop_debs "$d" 0.1.0-1~deb14 duke; api "$d" desktop
+refuses "forky's packages under duke's artifacts are refused" "the run publishes 0.1.0-1~deb15 for duke" \
     "$root/scripts/fetch-run.sh" desktop 7 "$d/out" "$two"
-d=$(case_dir); desktop_debs "$d"; for a in amd64 arm64; do make_deb "$d/art/duke-$a" bande-compositor 0.1.0~deb15 $a; done; api "$d" desktop
+d=$(case_dir); desktop_debs "$d"; for a in amd64 arm64; do make_deb "$d/art/duke-$a" bande-compositor 0.1.0-1~deb15 $a; done; api "$d" desktop
 refuses "a suite missing one of its artifacts is refused" "no single bande-debs-duke-all" "$root/scripts/fetch-run.sh" desktop 7 "$d/out" "$two"
-d=$(case_dir); make_deb "$d/art/duke-all" bande-desktop-l10n-sv 0.1.0~deb15+l10n20261108 all; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
+d=$(case_dir); make_deb "$d/art/duke-all" bande-desktop-l10n-sv 0.1.0-1~deb15+l10n20261108 all; workflow=l10n.yml ref=l10n-20261108 api "$d" desktop
 check "duke's packs carry ~deb15 before the stamp" "$root/scripts/fetch-run.sh" l10n 7 "$d/out" "$two"
-check "and go to duke alone" sh -c "test -e '$d/out/duke/bande-desktop-l10n-sv_0.1.0~deb15+l10n20261108_all.deb' && test ! -e '$d/out/forky'"
+check "and go to duke alone" sh -c "test -e '$d/out/duke/bande-desktop-l10n-sv_0.1.0-1~deb15+l10n20261108_all.deb' && test ! -e '$d/out/forky'"
 
 finish

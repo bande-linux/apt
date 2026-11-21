@@ -18,32 +18,32 @@ Each suite has one component, `main`, and the suites share one pool:
 
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
-| `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*` (the desktop and every Bande app), `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
+| `main` | amd64, arm64, all | green `release.yml` runs of `vX.Y.Z` and `vX.Y.Z-R` tag pushes of `bande-linux/desktop` (the binary packages of its `bande-desktop` source package), the tagged commit on `main` | `bande-*` (the desktop, every Bande app and the language packs), `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
 | `main` | amd64, arm64, all | green `browser-follow-debian.yml` runs (push, schedule or dispatch) on `main` of `bande-linux/desktop` that built the browser from `browser/` | `bande-browser`, `bande-browser-l10n-*`, `bande-firefox-esr-settings` |
-| `main` | all | green `l10n.yml` runs of `l10n-YYYYMMDD[.N]` tag pushes of `bande-linux/desktop`, the tagged commit on `main`: translation-only builds | `bande-desktop-l10n-*`, at `<release>+l10nYYYYMMDD[.N]` |
-| `main` | all | green `dict.yml` runs of `dict-YYYYMMDD` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-dict-*`, Dictionary's packs |
+| `main` | all | green `l10n.yml` runs of `l10n-YYYYMMDD[.N]` tag pushes of `bande-linux/desktop`, the tagged commit on `main`: translation-only builds | `bande-desktop-l10n-*`, at `<release>~debNN+l10nYYYYMMDD[.N]` |
+| `main` | all | green `dict.yml` runs of `dict-YYYYMMDD` tag pushes of `bande-linux/desktop` (its `bande-dict` source package), the tagged commit on `main` | `bande-dict-*`, Dictionary's packs |
 
 Each package keeps its newest version only, as in Debian's own suites.
 
 ### Suites and versions
 
-Every package built for a suite carries `~debNN` right after its release version, NN being the
+Every package built for a suite carries `~debNN` right after its Debian version, NN being the
 Debian version number (from distro-info-data's `debian.csv`; `forky` is 14), as Debian's
 backports carry `~bpoNN+N`:
 
 | Source | Version |
 |---|---|
-| desktop `vX.Y.Z` | `X.Y.Z~deb14` |
-| `l10n-YYYYMMDD[.N]` packs | `X.Y.Z~deb14+l10nYYYYMMDD[.N]`, X.Y.Z the release they translate |
-| dict `dict-YYYYMMDD` | `YYYYMMDD~deb14` |
+| desktop `vX.Y.Z`, `vX.Y.Z-R` | `X.Y.Z-1~deb14`, `X.Y.Z-R~deb14` (R a packaging-only revision) |
+| `l10n-YYYYMMDD[.N]` packs | `X.Y.Z-R~deb14+l10nYYYYMMDD[.N]`, X.Y.Z-R the release they translate |
+| dict `dict-YYYYMMDD` | `YYYYMMDD-1~deb14` |
 | browser (`bande-version-BASE`) | `BASE~deb14`, BASE `<debian-version>+bandeN` |
 | `bande-apt-source` | `1.N~deb14`, one per suite |
 | `bande-archive-keyring` | `1.N`, the same file for every suite |
 
-`~` sorts below everything, so `X.Y.Z~deb14` is older than an unsuffixed `X.Y.Z`, and
-`X.Y.Z~deb14` < `X.Y.Z~deb15`: a machine upgraded from forky to duke, its source switched to
+`~` sorts below everything, so `X.Y.Z-1~deb14` is older than an unsuffixed `X.Y.Z-1`, and
+`X.Y.Z-1~deb14` < `X.Y.Z-1~deb15`: a machine upgraded from forky to duke, its source switched to
 `duke`, upgrades Bande too, even at the same release. Find-runs compares a tag with the live
-versions without the suffix.
+versions without the suffix, a `vX.Y.Z` tag standing for `X.Y.Z-1`.
 
 A source run uploads, for each suite it built, `bande-debs-<suite>-<arch>` artifacts (the
 architectures below). A run without any artifact of a listed suite, such as one built before
@@ -94,16 +94,16 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    is nothing new:
    - apt: repository packages of a version newer than the live `bande-archive-keyring` of any
      suite (a suite not served yet has none);
-   - desktop: the green `release.yml` push of the highest `vX.Y.Z` tag, against the version of
-     `bande-desktop` in `main`;
+   - desktop: the green `release.yml` push of the highest `vX.Y.Z` or `vX.Y.Z-R` tag (as
+     `X.Y.Z-1` or `X.Y.Z-R`), against the version of `bande-desktop` in `main`;
    - dict: the green `dict.yml` push of the desktop's highest `dict-YYYYMMDD` tag, against the
-     version of `bande-dict-en` in `main`;
+     version of `bande-dict-en` in `main` (as `YYYYMMDD-1`);
    - browser: the newest green `browser-follow-debian.yml` run on `main` of the desktop that uploaded
      a `bande-version-VERSION` artifact (runs that found nothing new upload none), against the
      version of `bande-browser` in `main`;
    - l10n: the green `l10n.yml` push of the desktop's highest `l10n-YYYYMMDD[.N]` tag, unless
      the live `state/processed` lists it (the publish records every one it took or refused). It
-     waits while a `vX.Y.Z` tag on the run's history is newer than what `main` serves or this
+     waits while a release tag on the run's history is newer than what `main` serves or this
      publish takes, since its packs are built on that release.
 
    - resign: a suite's live `InRelease` has its `Valid-Until` less than 7 days out, or none.
@@ -122,14 +122,15 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
 1. [`scripts/fetch-run.sh`](scripts/fetch-run.sh) checks the run:
    - it must come from the repository's release workflow and end in success (for a run given
      by hand it waits for the run to finish);
-   - a desktop run must be the `push` of a `vX.Y.Z` tag that points at the run's commit; a
+   - a desktop run must be the `push` of a `vX.Y.Z` or `vX.Y.Z-R` tag that points at the run's commit; a
      desktop push to `main` is refused;
    - a browser run must be a `push`, `schedule` or `workflow_dispatch` run on `main`;
    - a dict run must be the desktop's `dict.yml` `push` of a `dict-YYYYMMDD` tag that points
-     at the run's commit; it carries `bande-dict-*` alone, at `YYYYMMDD`, in `all`;
+     at the run's commit; it carries `bande-dict-*` alone, at `YYYYMMDD-1`, in `all`;
    - an l10n run must be the desktop's `l10n.yml` `push` of an `l10n-YYYYMMDD[.N]` tag that
      points at the run's commit; it carries `bande-desktop-l10n-*` alone, in `all`, each at
-     `<release>+l10n<stamp>` where the tag `v<release>` is on the run's history;
+     `X.Y.Z-R~debNN+l10n<stamp>` where the release tag (`vX.Y.Z` for R 1, `vX.Y.Z-R` otherwise)
+     is on the run's history;
    - its commit must be on `main`.
 
    It then downloads, for each suite, the `bande-debs-<suite>-<arch>` artifacts into
@@ -138,7 +139,7 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    - package names outside the repository's list, and the repository packages;
    - a package filed under another architecture's artifact;
    - versions other than the run's plus the suite's suffix (see [Suites and
-     versions](#suites-and-versions)): the tag's `X.Y.Z~debNN` for the desktop, so
+     versions](#suites-and-versions)): the tag's `X.Y.Z-R~debNN` for the desktop, so
      test builds' `+git` versions are refused, and for the browser the version its one
      `bande-version-VERSION` artifact names, of the form `<debian-version>+bandeN`;
    - an incomplete architecture: one that lacks a package another architecture carries in that
