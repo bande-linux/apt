@@ -18,10 +18,9 @@ Each suite has one component, `main`, and the suites share one pool:
 
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
-| `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
-| `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for every `apps/<app>`, with its language packs `bande-<app>-l10n-*`; `bande-desktop` recommends those in the desktop's `packaging/bande-desktop/default-apps` |
+| `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*` (the desktop and every Bande app), `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
 | `main` | amd64, arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/web` that built the browser | `bande-browser`, `bande-browser-l10n-*` |
-| `main` | all | green `l10n.yml` runs of `l10n-YYYYMMDD[.N]` tag pushes of `bande-linux/desktop` and of `bande-linux/apps`, the tagged commit on `main`: translation-only builds | `bande-desktop-l10n-*`, `bande-<app>-l10n-*`, each at `<release>+l10nYYYYMMDD[.N]` |
+| `main` | all | green `l10n.yml` runs of `l10n-YYYYMMDD[.N]` tag pushes of `bande-linux/desktop`, the tagged commit on `main`: translation-only builds | `bande-desktop-l10n-*`, at `<release>+l10nYYYYMMDD[.N]` |
 | `main` | all | green `dict.yml` runs of `dict-YYYYMMDD` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-dict-*`, Dictionary's packs |
 
 Each package keeps its newest version only, as in Debian's own suites.
@@ -34,7 +33,7 @@ backports carry `~bpoNN+N`:
 
 | Source | Version |
 |---|---|
-| desktop `vX.Y.Z`, app `<app>-vX.Y.Z` | `X.Y.Z~deb14` |
+| desktop `vX.Y.Z` | `X.Y.Z~deb14` |
 | `l10n-YYYYMMDD[.N]` packs | `X.Y.Z~deb14+l10nYYYYMMDD[.N]`, X.Y.Z the release they translate |
 | dict `dict-YYYYMMDD` | `YYYYMMDD~deb14` |
 | web (`bande-version-BASE`) | `BASE~deb14`, BASE `<debian-version>+bandeN` |
@@ -73,9 +72,11 @@ repository may publish them, so the archive depends on none of them.
 - The same commit builds byte-identical packages. Every publish adds them to `main`, for every
   architecture; one already published at its version is kept.
 
-Each package name belongs to one source repository. The site keeps the owners in
-`state/owners`, and a publish refuses a name another source already publishes. An app can never
-take a name the desktop publishes.
+Each package name belongs to one source: `apt`, `desktop` (its language packs included), `dict`
+or `web`. The site keeps the owners in `state/owners`, and a publish refuses a name another
+source already publishes. A name whose owner is not one of these sources is free: a source that
+publishes it takes it, and otherwise it leaves the archive, as Debian drops the binaries a source
+no longer builds.
 
 ## How a publish works
 
@@ -100,16 +101,10 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    - web: the newest green `follow-debian.yml` run on `main` of `bande-linux/web` that uploaded
      a `bande-version-VERSION` artifact (runs that found nothing new upload none), against the
      version of `bande-browser` in `main`;
-   - apps: for each app, the green `build.yml` push of its highest `<app>-vX.Y.Z` tag, against
-     the version of `bande-<app>` in `main`, unless the live `state/processed` lists the run:
-     the publish records every apps run it took or refused there, so a refused tag is not
-     tried again until the app tags a newer version.
-
-   - l10n and apps-l10n: the green `l10n.yml` push of the highest `l10n-YYYYMMDD[.N]` tag of the
-     desktop and of the apps, unless `state/processed` lists it (the publish records every one
-     it took or refused). It waits while a release tag on the run's history (`vX.Y.Z`, or an
-     app's `<app>-vX.Y.Z`) is newer than what `main` serves or this publish takes, since its
-     packs are built on that release.
+   - l10n: the green `l10n.yml` push of the desktop's highest `l10n-YYYYMMDD[.N]` tag, unless
+     the live `state/processed` lists it (the publish records every one it took or refused). It
+     waits while a `vX.Y.Z` tag on the run's history is newer than what `main` serves or this
+     publish takes, since its packs are built on that release.
 
    - resign: a suite's live `InRelease` has its `Valid-Until` less than 7 days out, or none.
      Past it, only the re-sign is started.
@@ -132,41 +127,32 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    - a web run must be a `schedule` or `workflow_dispatch` run on `main`;
    - a dict run must be the desktop's `dict.yml` `push` of a `dict-YYYYMMDD` tag that points
      at the run's commit; it carries `bande-dict-*` alone, at `YYYYMMDD`, in `all`;
-   - an apps run must be the `push` of an `<app>-vX.Y.Z` tag that points at the run's commit,
-     for an `apps/<app>` at that commit; dispatch runs are test builds and are never published;
-   - an l10n or apps-l10n run must be the `l10n.yml` `push` of an `l10n-YYYYMMDD[.N]` tag that
-     points at the run's commit; it carries packs alone (`bande-desktop-l10n-*`, or
-     `bande-<app>-l10n-*` for an `apps/<app>` at that commit, never a desktop name), in `all`,
-     each at `<release>+l10n<stamp>` where the release tag (`v<release>`, `<app>-v<release>`) is on
-     the run's history;
+   - an l10n run must be the desktop's `l10n.yml` `push` of an `l10n-YYYYMMDD[.N]` tag that
+     points at the run's commit; it carries `bande-desktop-l10n-*` alone, in `all`, each at
+     `<release>+l10n<stamp>` where the tag `v<release>` is on the run's history;
    - its commit must be on `main`.
 
    It then downloads, for each suite, the `bande-debs-<suite>-<arch>` artifacts into
    `<dir>/<suite>/`. The desktop uploads `amd64`, `arm64` and `all`, web `amd64`, `arm64` and
-   `all` (the language packs), apps `amd64` and `arm64`, dict and l10n `all`. It refuses:
-   - package names outside the repository's list; for apps, exactly `bande-<app>` of the tag
-     and its packs `bande-<app>-l10n-*` (architecture `all`, in each architecture's artifact),
-     and never a name of the desktop's (its `packaging/`
-     directories, `bande-desktop`, `xdg-desktop-portal-bande`, the repository
-     packages);
+   `all` (the language packs), dict and l10n `all`. It refuses:
+   - package names outside the repository's list, and the repository packages;
    - a package filed under another architecture's artifact;
    - versions other than the run's plus the suite's suffix (see [Suites and
-     versions](#suites-and-versions)): the tag's `X.Y.Z~debNN` for the desktop and an app, so
+     versions](#suites-and-versions)): the tag's `X.Y.Z~debNN` for the desktop, so
      test builds' `+git` versions are refused, and for web the version its one
      `bande-version-VERSION` artifact names, of the form `<debian-version>+bandeN`;
    - an incomplete architecture: one that lacks a package another architecture carries in that
      suite.
 
-   Several apps runs merge into one directory, keeping each app's newest version. A refused
-   apps run is recorded as taken and left out, so it cannot hold up the other releases; the
-   publish then ends red, naming it.
+   A refused l10n run is recorded as taken and left out, so it cannot hold up the other
+   releases; the publish then ends red, naming it.
 2. [`scripts/rebuild.sh`](scripts/rebuild.sh) rebuilds the whole archive, every suite, with
    reprepro in a fresh database; [`conf/distribution.in`](conf/distribution.in) is each suite's
    stanza:
    - its input is the live site, whose `InRelease` signatures, `Packages` and pool checksums are
      all verified, plus the new packages, from `DIR/<suite>/`: `--add desktop:main=DIR` for
-     a desktop build, `--add web:main=DIR` for the browser, `--add-each apps:main=DIR`
-     for apps;
+     a desktop build, `--add web:main=DIR` for the browser, `--add-each apt:main=DIR` for
+     the repository packages;
    - a suite, component or architecture that the live site does not serve yet starts empty; a
      component the live site serves but `conf/distribution.in` no longer lists is dropped, with
      its pool files and its names in `state/owners`;
@@ -174,16 +160,15 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
      architecture-independent ones) must carry one version, and
      it refuses a version older than the live one and changed contents under a published
      version;
-   - for apps, each package stands alone: one whose version is already published, or older, is
-     skipped and the published one kept;
-   - for language packs (`--add-l10n desktop:main=DIR`, `--add-l10n apps:main=DIR`), after every
+   - for the repository packages, each package stands alone: one whose version is already
+     published, or older, is skipped and the published one kept;
+   - for language packs (`--add-l10n desktop:main=DIR`), after every
      other addition, a pack at `<release>+l10n<stamp>` goes in only while the package it
      `Enhances` is at `<release>`: one built on an older release, or on one not published, is
      skipped, so a translation-only build never replaces a newer release's packs;
-   - an apps package whose `apps/<app>` directory is gone from the apps' `main` (`--apps-dirs`,
-     which every publish passes) leaves the archive with its packs, as Debian drops the binaries
-     a source no longer builds;
-   - it refuses a name that `state/owners` gives to another source;
+   - it refuses a source other than `apt`, `desktop`, `dict` and `web`, and a name that
+     `state/owners` gives to another of them; a name `state/owners` gives to any other source
+     goes to the source that publishes it now, or leaves the archive;
    - reprepro builds the pool and the `Packages` indexes; `apt-ftparchive release` writes each
      suite's `Release` with SHA256 sums, `Acquire-By-Hash: yes` and `Valid-Until` 14 days out, and copies every index to
      `by-hash/SHA256/<sha256>` beside it (see [Pages caching](#pages-caching));
@@ -233,8 +218,8 @@ own. For up to ten minutes after a publish it can serve a new `InRelease` beside
 
 ## Workflow
 
-- **Access:** `github.token` with `actions: read` and `contents: read`; `desktop`, `web` and
-  `apps` are public, so no other token or GitHub App is involved.
+- **Access:** `github.token` with `actions: read` and `contents: read`; `desktop` and `web` are
+  public, so no other token or GitHub App is involved.
 - **Signing:** the signing subkey is a secret of the `apt-publish` environment, which only `main`
   can use.
 - **Deploy:** the site is deployed with `actions/deploy-pages`.
@@ -249,7 +234,7 @@ own. For up to ten minutes after a publish it can serve a new `InRelease` beside
   `bande-desktop`, checks that every installed `bande-*` package is built for the machine's
   architecture (or `all`) at that version, and starts the installed compositor headless. It
   warns about any package `bande-desktop` recommends that neither the archive nor that Debian
-  release has, such as a default app from `bande-linux/apps` that has not been released yet.
+  release has.
 
 ## First publish
 
