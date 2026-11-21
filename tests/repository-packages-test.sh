@@ -20,11 +20,6 @@ check "the keyring holds the archive keys" cmp <(gpg --batch --dearmor < "$root/
 check "the source follows forky main only" sh -c "$(declare -f file); scratch='$scratch'
     file a bande-apt-source '$version~deb14' etc/apt/sources.list.d/bande.sources | grep -qx 'Suites: forky' &&
     file a bande-apt-source '$version~deb14' etc/apt/sources.list.d/bande.sources | grep -qx 'Components: main'"
-check "it ships no apple source" sh -c "
-    ! dpkg-deb --fsys-tarfile '$scratch/a/forky/bande-apt-source_${version}~deb14_all.deb' | tar -tf - | grep -q apple"
-check "its postinst is executable and removes the old apple source on upgrade" sh -c "
-    dpkg-deb --ctrl-tarfile '$scratch/a/forky/bande-apt-source_${version}~deb14_all.deb' | tar -tvf - | grep -E '^-rwxr-xr-x .* \\./postinst$' &&
-    dpkg-deb --ctrl-tarfile '$scratch/a/forky/bande-apt-source_${version}~deb14_all.deb' | tar -xO ./postinst | grep -qF 'rm -f /etc/apt/sources.list.d/bande-apple.sources'"
 check "the source trusts only the keyring" sh -c "$(declare -f file); scratch='$scratch'
     file a bande-apt-source '$version~deb14' etc/apt/sources.list.d/bande.sources | grep -qx 'Signed-By: /usr/share/keyrings/bande-archive-keyring.pgp'"
 check "the source depends on the keyring" sh -c "dpkg-deb -f '$scratch/a/forky/bande-apt-source_${version}~deb14_all.deb' Depends | grep -qx bande-archive-keyring"

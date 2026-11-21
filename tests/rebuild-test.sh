@@ -105,8 +105,8 @@ make_deb "$scratch/in-mixed/forky" bande-apt-source 1.1 all
 refuses "a source may not publish the repository packages" "bande-apt-source is built by apt itself, not desktop" \
     rebuild --live "$live" --add desktop:main="$scratch/in-mixed" --out "$scratch/mixed"
 make_deb "$scratch/in-misplaced/forky" bande-archive-keyring 1.1 all
-refuses "a component the archive lacks is refused" "the archive has no component apple" \
-    rebuild --live "$live" --add-each apt:apple="$scratch/in-misplaced" --out "$scratch/misplaced"
+refuses "a component the archive lacks is refused" "the archive has no component contrib" \
+    rebuild --live "$live" --add-each apt:contrib="$scratch/in-misplaced" --out "$scratch/misplaced"
 REPOSITORY_VERSION=1.0 SOURCE_DATE_EPOCH=86400 "$root/scripts/build-repository-packages.sh" "$scratch/in-apt-rebuilt" > /dev/null
 check "rebuilt repository packages of the same version are skipped" rebuild --live "$live" \
     --add-each apt:main="$scratch/in-apt-rebuilt" --out "$scratch/apt-same"
@@ -192,9 +192,8 @@ make_deb "$scratch/in-arm64/forky" bande-desktop "$d1" all
 partial_conf=$scratch/partial-conf
 cp -r "$conf" "$partial_conf"
 sed -i 's/^Architectures: .*/Architectures: arm64/' "$partial_conf/distribution.in"
-(export GNUPGHOME=$conf/gnupg
- "$root/scripts/rebuild.sh" --conf "$partial_conf" --live "$(serve "$empty")" \
-    --add desktop:main="$scratch/in-arm64" --out "$scratch/partial") > /dev/null
+GNUPGHOME=$conf/gnupg "$root/scripts/rebuild.sh" --conf "$partial_conf" --live "$(serve "$empty")" \
+    --add desktop:main="$scratch/in-arm64" --out "$scratch/partial" > /dev/null
 check "a live Release without amd64 is taken" sh -c \
     "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/partial")' --add-each apt:main='$scratch/in-apt' --out '$scratch/grown' > '$scratch/grown.log'"
 check "it says what starts empty" grep -q "does not list main/binary-amd64/Packages.xz yet" "$scratch/grown.log"
@@ -203,25 +202,23 @@ check "the new architecture starts empty" lacks "$scratch/grown" main amd64 "ban
 check "and takes the new packages" both "$scratch/grown" main bande-archive-keyring=1.0
 
 # A component conf/distribution.in no longer lists leaves the site: the live
-# site has main and apple, the archive main alone.
+# site has main and extra, the archive main alone.
 old_conf=$scratch/old-conf
 cp -r "$conf" "$old_conf"
-sed -i 's/^Components: .*/Components: main apple/' "$old_conf/distribution.in"
-make_deb "$scratch/in-old-apple/forky" linux-image-7.2.12-apple-arm64-16k 7.2.12-1+bande1 arm64
-make_deb "$scratch/in-old-apple/forky" bande-os-apple 7.2.12-1+bande1 arm64
-(export GNUPGHOME=$conf/gnupg
- "$root/scripts/rebuild.sh" --conf "$old_conf" --live "$(serve "$site")" \
-    --add kernel:apple="$scratch/in-old-apple" --out "$scratch/with-apple") > /dev/null
-check "the old site serves apple" has "$scratch/with-apple" apple arm64 bande-os-apple=7.2.12-1+bande1
+sed -i 's/^Components: .*/Components: main extra/' "$old_conf/distribution.in"
+make_deb "$scratch/in-old-extra/forky" bande-extra 7.2.12-1+bande1 arm64
+GNUPGHOME=$conf/gnupg "$root/scripts/rebuild.sh" --conf "$old_conf" --live "$(serve "$site")" \
+    --add desktop:extra="$scratch/in-old-extra" --out "$scratch/with-extra" > /dev/null
+check "the old site serves extra" has "$scratch/with-extra" extra arm64 bande-extra=7.2.12-1+bande1
 check "a publish over it" sh -c \
-    "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/with-apple")' --add-each apt:main='$scratch/in-apt' --out '$scratch/no-apple' > '$scratch/no-apple.log'"
-check "says it drops apple" grep -q "forky/apple is no longer a component; dropping it" "$scratch/no-apple.log"
-check "Release lists main alone" grep -qx 'Components: main' "$scratch/no-apple/dists/forky/Release"
-check "apple's indexes are gone" test ! -e "$scratch/no-apple/dists/forky/apple"
-check "and its pool files" sh -c "! find '$scratch/no-apple/pool' -name '*apple*' | grep -q ."
-check "and its names in state/owners" sh -c "! grep -q apple '$scratch/no-apple/state/owners'"
-check "and in state/by-hash" sh -c "! grep -q '^[^ ]* forky/apple/' '$scratch/no-apple/state/by-hash'"
-check "main carries over" diff <(listed "$site" main arm64) <(listed "$scratch/no-apple" main arm64)
+    "'$root/scripts/rebuild.sh' --conf '$conf' --live '$(serve "$scratch/with-extra")' --add-each apt:main='$scratch/in-apt' --out '$scratch/no-extra' > '$scratch/no-extra.log'"
+check "says it drops extra" grep -q "forky/extra is no longer a component; dropping it" "$scratch/no-extra.log"
+check "Release lists main alone" grep -qx 'Components: main' "$scratch/no-extra/dists/forky/Release"
+check "extra's indexes are gone" test ! -e "$scratch/no-extra/dists/forky/extra"
+check "and its pool files" sh -c "! find '$scratch/no-extra/pool' -name '*extra*' | grep -q ."
+check "and its names in state/owners" sh -c "! grep -q extra '$scratch/no-extra/state/owners'"
+check "and in state/by-hash" sh -c "! grep -q '^[^ ]* forky/extra/' '$scratch/no-extra/state/by-hash'"
+check "main carries over" diff <(listed "$site" main arm64) <(listed "$scratch/no-extra" main arm64)
 
 tampered=$(mktemp -d -p "$scratch")
 cp -r "$site/." "$tampered/"

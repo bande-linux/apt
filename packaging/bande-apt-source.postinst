@@ -1,7 +1,0 @@
-#!/bin/sh
-set -e
-# The archive no longer has an apple component; remove the source that earlier
-# versions added for it.
-if [ "$1" = configure ] && [ -n "$2" ]; then
-    rm -f /etc/apt/sources.list.d/bande-apple.sources
-fi

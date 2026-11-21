@@ -17,7 +17,7 @@ Each suite has one component, `main`, and the suites share one pool:
 | Component | Architectures | Fed by | Names |
 |---|---|---|---|
 | `main` | amd64, arm64 | green `release.yml` runs of `vX.Y.Z` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-*`, `xdg-desktop-portal-bande`, `libpam-bande-secrets` |
-| `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`, with its language packs `bande-<app>-l10n-*`: Terminal, Software, the Package Installer and Activity Monitor (recommended by `bande-desktop`), Mail, Calendar |
+| `main` | amd64, arm64 | green `build.yml` runs of `<app>-vX.Y.Z` tag pushes of `bande-linux/apps`, the tagged commit on `main`, one app per tag | `bande-<app>` for each `apps/<app>`, with its language packs `bande-<app>-l10n-*`: Terminal, Software, the Package Installer and System Monitor (recommended by `bande-desktop`), Mail, Calendar |
 | `main` | amd64, arm64 | green scheduled or dispatched `follow-debian.yml` runs on `main` of `bande-linux/web` that built the browser | `bande-browser`, `bande-browser-l10n-*` |
 | `main` | all | green `l10n.yml` runs of `l10n-YYYYMMDD[.N]` tag pushes of `bande-linux/desktop` and of `bande-linux/apps`, the tagged commit on `main`: translation-only builds | `bande-desktop-l10n-*`, `bande-<app>-l10n-*`, each at `<release>+l10nYYYYMMDD[.N]` |
 | `main` | all | green `dict.yml` runs of `dict-YYYYMMDD` tag pushes of `bande-linux/desktop`, the tagged commit on `main` | `bande-dict-*`, Dictionary's packs |
@@ -39,8 +39,7 @@ backports carry `~bpoNN+N`:
 | `bande-apt-source` | `1.N~deb14`, one per suite |
 | `bande-archive-keyring` | `1.N`, the same file for every suite |
 
-`~` sorts below everything, so `X.Y.Z~deb14` is older than an unsuffixed `X.Y.Z` (the packages
-published before the suffix are carried over until a newer release replaces them), and
+`~` sorts below everything, so `X.Y.Z~deb14` is older than an unsuffixed `X.Y.Z`, and
 `X.Y.Z~deb14` < `X.Y.Z~deb15`: a machine upgraded from forky to duke, its source switched to
 `duke`, upgrades Bande too, even at the same release. Find-runs compares a tag with the live
 versions without the suffix.
@@ -75,8 +74,7 @@ repository may publish them, so the archive depends on none of them.
 Each package name belongs to one source repository. The site keeps the owners in
 `state/owners`, and a publish refuses a name another source already publishes. An app can never
 take a name the desktop publishes. [`conf/handovers`](conf/handovers) moves a name from one source
-to another: `bande-browser` went from the apps' own engine to the Firefox-based build of the web
-repository.
+to another.
 
 ## How a publish works
 
