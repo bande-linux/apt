@@ -74,9 +74,8 @@ repository may publish them, so the archive depends on none of them.
 
 Each package name belongs to one source: `apt`, `browser`, `desktop` (its language packs included)
 or `dict`. The site keeps the owners in `state/owners`, and a publish refuses a name another
-source already publishes. A name whose owner is not one of these sources is free: a source that
-publishes it takes it, and otherwise it leaves the archive, as Debian drops the binaries a source
-no longer builds.
+source already publishes. A name whose owner is not one of these sources stays in the archive as
+it is until one of them publishes it and takes it.
 
 ## How a publish works
 
@@ -169,7 +168,7 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
      skipped, so a translation-only build never replaces a newer release's packs;
    - it refuses a source other than `apt`, `browser`, `desktop` and `dict`, and a name that
      `state/owners` gives to another of them; a name `state/owners` gives to any other source
-     goes to the source that publishes it now, or leaves the archive;
+     stays until one of them publishes it;
    - reprepro builds the pool and the `Packages` indexes; `apt-ftparchive release` writes each
      suite's `Release` with SHA256 sums, `Acquire-By-Hash: yes` and `Valid-Until` 14 days out, and copies every index to
      `by-hash/SHA256/<sha256>` beside it (see [Pages caching](#pages-caching));

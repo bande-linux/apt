@@ -290,9 +290,9 @@ check "a publish over packages of a source the archive no longer takes" sh -c "'
     --live '$(serve "$scratch/r0")' --add desktop:main='$scratch/in-r1' --out '$scratch/r1' > '$scratch/r1.log'"
 check "lets the desktop take one of their names" both "$scratch/r1" main bande-clock=0.2.0~deb14
 check "which it then owns" grep -qx 'bande-clock desktop' "$scratch/r1/state/owners"
-check "drops the others with their packs" sh -c "! grep -q '^Package: bande-viewer' '$scratch/r1/dists/forky/main/binary-amd64/Packages' &&
-    ! find '$scratch/r1/pool' -name 'bande-viewer*' | grep -q . && ! grep -q '^bande-viewer' '$scratch/r1/state/owners'"
-check "saying so" grep -q 'no source the archive takes publishes bande-viewer-l10n-sv any more; dropping it from forky/main' "$scratch/r1.log"
+check "keeps serving the others until a source takes them" both "$scratch/r1" main bande-viewer=0.1.0~deb14
+check "with their packs" both "$scratch/r1" main bande-viewer-l10n-sv=0.1.0~deb14
+check "under their old owner" grep -qx 'bande-viewer apps' "$scratch/r1/state/owners"
 check "and keeps the other sources' packages" both "$scratch/r1" main bande-archive-keyring=1.0
 
 # Two suites: duke is added beside the live forky, which serves packages

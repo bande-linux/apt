@@ -164,8 +164,7 @@ newest() {
 
 shopt -s nullglob
 : > "$work/new"
-awk -v s="$sources" 'index(s, " " $2 " ")' "$work/owners" > "$work/claims"
-awk -v s="$sources" '!index(s, " " $2 " ") { print $1 }' "$work/owners" > "$work/gone"
+cp "$work/owners" "$work/claims"
 for batch in "${batches[@]}"; do
     mode=${batch%% *} batch=${batch#* }
     source=${batch%%:*} component=${batch#*:} component=${component%%=*} debs=${batch#*=}
@@ -183,8 +182,9 @@ for batch in "${batches[@]}"; do
                 [ "$source" = apt ] || fail "$package is built by apt itself, not $source"
                 [ "$component" = main ] || fail "$package belongs in main, not $component"
             fi
-            owner=$(awk -v p="$package" '$1 == p { print $2; exit }' "$work/claims")
-            [ -z "$owner" ] || [ "$owner" = "$source" ] || fail "$package is published from $owner, not $source"
+            owner=$(awk -v p="$package" '$1 == p { o = $2 } END { print o }' "$work/claims")
+            [ -z "$owner" ] || [ "$owner" = "$source" ] || [[ $sources != *" $owner "* ]] ||
+                fail "$package is published from $owner, not $source"
             echo "$mode $suite/$component $package $arch $version $deb" >> "$work/batch"
         done
     done
@@ -248,14 +248,6 @@ done < "$work/new"
 while read -r mode c package arch version deb; do
     [ "$mode" != l10n ] || add "$mode" "$c" "$package" "$arch" "$version" "$deb"
 done < "$work/new"
-
-awk 'FILENAME == ARGV[1] { claimed[$1] = 1; next } FILENAME == ARGV[2] { if (!($1 in claimed)) gone[$1] = 1; next }
-    { name = $2 } (name in gone) { print $1, $2 > "/dev/stderr"; next } { print }' \
-    "$work/claims" "$work/gone" "$work/rows" 2> "$work/dropped" > "$work/kept"
-mv "$work/kept" "$work/rows"
-sort -u "$work/dropped" | while read -r c package; do
-    echo "rebuild: no source the archive takes publishes $package any more; dropping it from $c"
-done
 
 mkdir -p "$work/repo/conf"
 for suite in $suites; do stanza "$suite"; echo; done > "$work/repo/conf/distributions"
@@ -324,7 +316,7 @@ sed "s/@FINGERPRINT@/$fingerprint/g" "$site_template/index.html" > "$out/index.h
 
 mkdir -p "$out/state"
 for suite in $suites; do reprepro -b "$work/repo" list "$suite"; done | awk '{ print $2 }' | sort -u | while read -r package; do
-    awk -v p="$package" '$1 == p { print; exit }' "$work/claims"
+    awk -v p="$package" '$1 == p { o = $0 } END { if (o != "") print o }' "$work/claims"
 done > "$out/state/owners"
 for entry in "${processed[@]}"; do
     tr , '\n' <<< "${entry#*=}" | sed "s/^/${entry%%=*} /" >> "$work/processed"
