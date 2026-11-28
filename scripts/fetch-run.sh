@@ -1,7 +1,8 @@
 #!/bin/bash
 # Usage: fetch-run.sh REPO RUN_ID OUT_DIR [CONF_DIR]
 #        REPO: browser, desktop, dict or l10n. Needs GH_TOKEN; waits up to
-#        $FETCH_RUN_WAIT seconds (default 900) for a run still going.
+#        $FETCH_RUN_WAIT seconds (default 900) for a run still going. Exits 1 when it refuses the
+#        run, 75 when GitHub cannot be read.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -11,6 +12,7 @@ wait_limit=${FETCH_RUN_WAIT:-900}
 poll=${FETCH_RUN_POLL:-15}
 repository_packages=" bande-archive-keyring bande-apt-source "
 fail() { echo "fetch-run: $*" >&2; exit 1; }
+unavailable() { echo "fetch-run: $*" >&2; exit 75; }
 # shellcheck source=scripts/suites.sh
 . "$here/suites.sh"
 suites=$(suite_list "$conf") || fail "conf/suites is not usable"
@@ -56,7 +58,7 @@ call() {
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-call "$api/repos/$repo/actions/runs/$run" > "$work/run.json" || fail "cannot read run $run of $repo"
+call "$api/repos/$repo/actions/runs/$run" > "$work/run.json" || unavailable "cannot read run $run of $repo"
 read -r event path ref sha owner < <(jq -r '[.event, .path, .head_branch, .head_sha, .head_repository.full_name] | @tsv' "$work/run.json")
 [ "$path" = "$workflow" ] || fail "run $run is from $path, not $workflow"
 [ "$owner" = "$repo" ] || fail "run $run built $owner, not $repo"
@@ -91,17 +93,18 @@ while :; do
     [ "$waited" -lt "$wait_limit" ] || fail "run $run is still $status after ${wait_limit}s"
     sleep "$poll"
     waited=$((waited + poll))
-    call "$api/repos/$repo/actions/runs/$run" > "$work/run.json" || fail "cannot read run $run of $repo"
+    call "$api/repos/$repo/actions/runs/$run" > "$work/run.json" || unavailable "cannot read run $run of $repo"
 done
 [ "$conclusion" = success ] || fail "run $run ended in $conclusion, not success"
 
-status=$(call "$api/repos/$repo/compare/$sha...main" | jq -r .status)
+status=$(call "$api/repos/$repo/compare/$sha...main" | jq -r .status) || unavailable "cannot compare $sha with main"
 case $status in
     identical | ahead) ;;
     *) fail "$sha is not on main ($status)" ;;
 esac
 
-call "$api/repos/$repo/actions/runs/$run/artifacts?per_page=100" > "$work/artifacts.json"
+call "$api/repos/$repo/actions/runs/$run/artifacts?per_page=100" > "$work/artifacts.json" ||
+    unavailable "cannot list the artifacts of run $run"
 if [ "$source_repo" = browser ]; then
     mapfile -t named < <(jq -r '.artifacts[].name | select(startswith("bande-version-")) | ltrimstr("bande-version-")' \
         "$work/artifacts.json")
@@ -135,7 +138,7 @@ fetch_suite() {
         id=$(jq -r --arg n "$name" '[.artifacts[] | select(.name == $n)] | if length == 1 then .[0].id else "" end' \
             "$work/artifacts.json")
         [ -n "$id" ] || fail "run $run has no single $name artifact"
-        call "$api/repos/$repo/actions/artifacts/$id/zip" > "$work/$name.zip" || fail "cannot download $name"
+        call "$api/repos/$repo/actions/artifacts/$id/zip" > "$work/$name.zip" || unavailable "cannot download $name"
         mkdir "$work/$name"
         unzip -q -j "$work/$name.zip" '*.deb' -d "$work/$name" 2> /dev/null || fail "$name holds no packages"
         for deb in "$work/$name"/*.deb; do

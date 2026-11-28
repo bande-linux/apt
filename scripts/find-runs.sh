@@ -16,8 +16,7 @@
 #   desktop with a bande-version-VERSION artifact; the live one is
 #   bande-browser's in main;
 # - l10n: the green l10n.yml push of the desktop's highest l10n-YYYYMMDD[.N]
-#   tag, translation-only language packs, unless the live state/processed, which
-#   holds the runs already taken or refused, lists the run. It waits while a
+#   tag, translation-only language packs. It waits while a
 #   release tag on the run's history is newer than what the archive serves or
 #   this publish takes, since its packs are built on that release (rebuild.sh
 #   --add-l10n).
@@ -26,6 +25,8 @@
 #   it may be an old one replayed: it is no base for new runs, so only "resign
 #   expired" is printed, and the publish re-signs the archive from its verified
 #   signature.
+# A run the live state/processed lists, which holds the runs a publish took or
+# refused, is not printed again.
 # InRelease and state/processed are read past the Pages CDN (fetch-fresh.sh),
 # and the indexes by hash, so a publish in progress cannot mix generations.
 # fetch-run.sh checks each printed run in full. Needs GH_TOKEN; the source
@@ -153,6 +154,19 @@ if [ -n "${APT_VERSION:-}" ]; then
     fi
 fi
 
+: > "$work/processed"
+if [ -n "$live_suites" ]; then
+    code=$("$here/fetch-fresh.sh" "$live" state/processed "$work/processed") ||
+        fail "cannot fetch $live/state/processed"
+    case $code in
+        200) ;;
+        404) : > "$work/processed" ;;
+        *) fail "$live/state/processed answered HTTP $code" ;;
+    esac
+fi
+# taken SOURCE RUN: true when a publish already took or refused the run.
+taken() { grep -qx "$1 $2" "$work/processed"; }
+
 listing "$api/repos/bande-linux/desktop/actions/workflows/release.yml/runs?event=push&status=success&per_page=100" \
     "$work/desktop.json" '{"workflow_runs": []}' "the desktop's release runs"
 desktop_run='' desktop_version='' desktop_next=''
@@ -166,7 +180,9 @@ done < <(jq -r '.workflow_runs[] | select(.event == "push" and .conclusion == "s
 if [ -n "$desktop_run" ]; then
     served=$(live_version main arm64 bande-desktop)
     desktop_next=$served
-    if newer "$desktop_version" "$served"; then
+    if taken desktop "$desktop_run"; then
+        echo "find-runs: desktop $desktop_version (run $desktop_run) was taken or refused" >&2
+    elif newer "$desktop_version" "$served"; then
         echo "desktop $desktop_run"
         desktop_next=$desktop_version
     else
@@ -188,7 +204,9 @@ done < <(jq -r '.workflow_runs[] | select(.event == "push" and .conclusion == "s
     "$work/dict.json")
 if [ -n "$dict_run" ]; then
     served=$(live_version main arm64 bande-dict-en)
-    if newer "$dict_version" "$served"; then
+    if taken dict "$dict_run"; then
+        echo "find-runs: the dictionary packs $dict_version (run $dict_run) were taken or refused" >&2
+    elif newer "$dict_version" "$served"; then
         echo "dict $dict_run"
     else
         echo "find-runs: the dictionary packs $dict_version (run $dict_run) are published" >&2
@@ -210,7 +228,9 @@ done < <(jq -r '.artifacts[] | select((.name | startswith("bande-version-")) and
     | "\(.workflow_run.id) \(.name | ltrimstr("bande-version-"))"' "$work/artifacts.json" | head -20)
 if [ -n "$browser_run" ]; then
     served=$(live_version main arm64 bande-browser)
-    if newer "$browser_version" "$served"; then
+    if taken browser "$browser_run"; then
+        echo "find-runs: browser $browser_version (run $browser_run) was taken or refused" >&2
+    elif newer "$browser_version" "$served"; then
         echo "browser $browser_run"
     else
         echo "find-runs: browser $browser_version (run $browser_run) is published" >&2
@@ -219,16 +239,6 @@ else
     echo "find-runs: the desktop has no green browser run that built a package" >&2
 fi
 
-: > "$work/processed"
-if [ -n "$live_suites" ]; then
-    code=$("$here/fetch-fresh.sh" "$live" state/processed "$work/processed") ||
-        fail "cannot fetch $live/state/processed"
-    case $code in
-        200) ;;
-        404) : > "$work/processed" ;;
-        *) fail "$live/state/processed answered HTTP $code" ;;
-    esac
-fi
 # release_waits SHA NEXT: true, naming it, when the desktop's highest release
 # tag is newer than NEXT, the version the archive will serve, and is on the
 # history of SHA.
@@ -259,7 +269,7 @@ done < <(jq -r '.workflow_runs[] | select(.event == "push" and .conclusion == "s
     | "\(.id) \(.head_branch) \(.head_sha)"' "$work/l10n.json")
 if [ -z "$run" ]; then
     echo "find-runs: the desktop has no green l10n-YYYYMMDD run" >&2
-elif grep -qx "l10n $run" "$work/processed"; then
+elif taken l10n "$run"; then
     echo "find-runs: the language packs l10n-$stamp of the desktop (run $run) were taken" >&2
 else
     listing "$api/repos/bande-linux/desktop/git/matching-refs/tags/" "$work/tags.json" '[]' "the desktop's tags"

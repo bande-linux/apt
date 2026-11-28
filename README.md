@@ -100,15 +100,16 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    - browser: the newest green `browser-follow-debian.yml` run on `main` of the desktop that uploaded
      a `bande-version-VERSION` artifact (runs that found nothing new upload none), against the
      version of `bande-browser` in `main`;
-   - l10n: the green `l10n.yml` push of the desktop's highest `l10n-YYYYMMDD[.N]` tag, unless
-     the live `state/processed` lists it (the publish records every one it took or refused). It
+   - l10n: the green `l10n.yml` push of the desktop's highest `l10n-YYYYMMDD[.N]` tag. It
      waits while a release tag on the run's history is newer than what `main` serves or this
      publish takes, since its packs are built on that release.
 
    - resign: a suite's live `InRelease` has its `Valid-Until` less than 7 days out, or none.
      Past it, only the re-sign is started.
 
-   Each live version is the newest across the suites, without the suite's `~debNN`.
+   Each live version is the newest across the suites, without the suite's `~debNN`. A run the
+   live `state/processed` lists is not taken again: the publish records there every run it took
+   or refused.
 
    With nothing new the workflow stops there: no rebuild, no deploy, and no use of the
    `apt-publish` environment. Releases of several repositories found together go out in one
@@ -144,8 +145,9 @@ public repositories with its own `github.token`. Its only secret is `APT_SIGNING
    - an incomplete architecture: one that lacks a package another architecture carries in that
      suite.
 
-   A refused l10n run is recorded as taken and left out, so it cannot hold up the other
-   releases; the publish then ends red, naming it.
+   A refused run is recorded as taken and left out, so it cannot hold up the other releases;
+   a run that cannot be read from GitHub is left out for a later publish. Either way the
+   publish ends red, naming it.
 2. [`scripts/rebuild.sh`](scripts/rebuild.sh) rebuilds the whole archive, every suite, with
    reprepro in a fresh database; [`conf/distribution.in`](conf/distribution.in) is each suite's
    stanza:

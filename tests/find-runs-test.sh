@@ -134,6 +134,11 @@ d=$(mktemp -d -p "$scratch"); l10n_runs="90:l10n-20261108:success" desktop_tags=
     on_history="v0.1.0" api "$d"
 check "taken language pack runs are not taken again" find_runs "$d/out" "$(serve "$scratch/site-l10n")"
 check "nothing is printed for them" test ! -s "$d/out"
+"$root/scripts/rebuild.sh" --conf "$conf" --live "$live" --processed desktop=31 --processed browser=41 \
+    --out "$scratch/site-taken" > /dev/null
+d=$(mktemp -d -p "$scratch"); desktop_runs="31:v0.2.0:success" browser_runs="41:153.7.0esr-1+bande1:success" api "$d"
+check "runs a publish took or refused are not taken again" find_runs "$d/out" "$(serve "$scratch/site-taken")"
+check "nothing is printed for those runs" test ! -s "$d/out"
 d=$(mktemp -d -p "$scratch"); mkdir -p "$d/repos/bande-linux/desktop/actions/runs" "$d/repos/bande-linux/desktop/actions/artifacts"
 jq -n '{artifacts: [{name: "bande-version-153.7.0esr-1+bande1", expired: false, workflow_run: {id: 41}}]}' \
     > "$d/repos/bande-linux/desktop/actions/artifacts/index.html"

@@ -118,19 +118,22 @@ jobs:
           : > refused
           while read -r repo run; do
             [ "$repo" != apt ] && [ "$repo" != resign ] || continue
-            if [ "$repo" = l10n ]; then
-              if env -u GITHUB_OUTPUT scripts/fetch-run.sh l10n "$run" debs-l10n < /dev/null; then
-                printf -- '--add-l10n\ndesktop:main=debs-l10n\n' >> adds
-              else
-                echo "::error::l10n run $run is refused; it is marked as taken and left out"
-                echo "l10n $run" >> refused
-              fi
-              printf -- '--processed\nl10n=%s\n' "$run" >> adds
-              continue
-            fi
-            component=$(env -u GITHUB_OUTPUT scripts/fetch-run.sh "$repo" "$run" "debs-$repo" < /dev/null |
-              sed -n 's/^component=//p')
-            printf -- '--add\n%s:%s=debs-%s\n' "$repo" "$component" "$repo" >> adds
+            status=0
+            env -u GITHUB_OUTPUT scripts/fetch-run.sh "$repo" "$run" "debs-$repo" < /dev/null > fetched || status=$?
+            case $status in
+              0)
+                component=$(sed -n 's/^component=//p' fetched)
+                if [ "$repo" = l10n ]; then
+                  printf -- '--add-l10n\ndesktop:%s=debs-l10n\n' "$component" >> adds
+                else
+                  printf -- '--add\n%s:%s=debs-%s\n' "$repo" "$component" "$repo" >> adds
+                fi
+                ;;
+              1) echo "::error::$repo run $run is refused; it is marked as taken and left out" ;;
+              *) echo "::error::$repo run $run cannot be read from GitHub now; it is left out and taken again later" ;;
+            esac
+            [ "$status" = 0 ] || echo "$repo $run" >> refused
+            [ "$status" -gt 1 ] || printf -- '--processed\n%s=%s\n' "$repo" "$run" >> adds
           done < <(tr , '\n' <<< "$RUNS")
           echo "refused=$(paste -sd, refused)" >> "$GITHUB_OUTPUT"
 
@@ -327,5 +330,5 @@ jobs:
         env:
           REFUSED: ${{ needs.build.outputs.refused }}
         run: |
-          echo "::error::published without these refused runs: $REFUSED; see the build job's log"
+          echo "::error::published without these runs: $REFUSED; see the build job's log"
           exit 1

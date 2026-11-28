@@ -196,6 +196,11 @@ refuses "packs with the suffix after the stamp are refused" "not X.Y.Z-R~deb14+l
 d=$(case_dir); make_deb "$d/art/amd64" bande-compositor "$desktop_version" amd64; api "$d" desktop
 refuses "a run with no suite's artifacts is refused" "no bande-debs-SUITE-ARCH artifacts for any suite of conf/suites: forky" fetch desktop "$d/out"
 
+d=$(case_dir); desktop_debs "$d"; compare=diverged api "$d" desktop
+check "a refusal exits 1" sh -c "'$root/scripts/fetch-run.sh' desktop 7 '$d/out' 2> /dev/null; test \$? = 1"
+d=$(case_dir); desktop_debs "$d"; api "$d" desktop; rm "$d/repos/bande-linux/desktop/actions/runs/7/artifacts"
+check "a GitHub it cannot read is no refusal" sh -c "'$root/scripts/fetch-run.sh' desktop 7 '$d/out' 2> /dev/null; test \$? = 75"
+
 two=$scratch/two-suites
 mkdir -p "$two" && printf 'forky\nduke\n' > "$two/suites"
 d=$(case_dir); desktop_debs "$d"; api "$d" desktop
